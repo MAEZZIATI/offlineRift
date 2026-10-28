@@ -9,16 +9,19 @@ not establish useful strategy, optimality, or calibrated win probabilities.
 
 ## Architecture
 
-- `workflow.py`: configured-player collection, patch catalogs, immutable dataset
+- `src/offline_rift/workflow.py`: configured-player collection, patch catalogs, immutable dataset
   builds, versioned training runs, and latest-completed artifact references.
-- `data_pipeline.py`: Riot API routing/retries and causal timeline reconstruction.
-- `features.py`: the shared feature contract, item catalog, and objective estimates.
-- `action_labeler.py`: weak macro labels, rewards, explicit transitions, and validation.
-- `rl_agent.py`: d3rlpy CQL training and policy loading.
-- `live_client.py`: local polling and live feature adaptation.
-- `train_macro_model.py`: direct training CLI; prefer the workflow for normal operation.
+- `src/offline_rift/pipeline/data_pipeline.py`: Riot API routing/retries and causal timeline reconstruction.
+- `src/offline_rift/pipeline/features.py`: the shared feature contract, item catalog, and objective estimates.
+- `src/offline_rift/pipeline/action_labeler.py`: weak macro labels, rewards, explicit transitions, and validation.
+- `src/offline_rift/training/rl_agent.py`: d3rlpy CQL training and policy loading.
+- `src/offline_rift/inference/live_client.py`: local polling and live feature adaptation.
+- `src/offline_rift/training/train_macro_model.py`: direct training CLI; prefer the workflow for normal operation.
 - `tests/`: deterministic fixtures, mocked transport, and short real optimizer tests.
 - `docs/`: workflow, backend contract, and results from specific real-data experiments.
+- `configs/`: tracked configuration examples; local `workflow.json` remains at the root.
+- Root Python files are compatibility entry points. Keep implementation in
+  `src/offline_rift/` and import that package in new code and tests.
 
 ## Development conventions
 
@@ -26,7 +29,8 @@ not establish useful strategy, optimality, or calibrated win probabilities.
 - Keep changes scoped and object interfaces clear. Avoid duplicate orchestration paths.
 - Prefer `rift`/`python workflow.py` commands for end-user workflows. Collection is
   currently scoped to Faker's configured account; preserve that scope unless requested.
-- Centralize feature definitions and availability masks in `features.py`. Preserve
+- Centralize feature definitions and availability masks in
+  `src/offline_rift/pipeline/features.py`. Preserve
   training/live feature order and scaling. Version incompatible schemas explicitly.
 - Keep documentation and CLI help synchronized with behavior. Use real-data examples;
   synthetic fixtures belong in tests and must not be presented as trained strategy.

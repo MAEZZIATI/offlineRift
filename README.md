@@ -78,16 +78,18 @@ a single poll. Outside an active local game, polling returns an offline status.
   artifact layout, interruption recovery, reports, and limitations.
 - **[Backend reference](docs/BACKEND.md):** modules, Python interfaces, features, MDP arrays.
 - **[First real-data results](docs/RESULTS.md):** the 100-match baseline and its limitations.
+- **[Project structure](docs/STRUCTURE.md):** package layout, compatibility entry points,
+  and locations for configuration and generated artifacts.
 
 | File | Responsibility |
 |---|---|
-| `workflow.py` | Collection/cache orchestration, patch catalogs, versioned datasets and runs |
-| `data_pipeline.py` | Riot requests and causal 10-second snapshots |
-| `features.py` | Shared feature schema, item valuation, objective estimates |
-| `action_labeler.py` | Five weak macro labels, rewards, NPZ validation |
-| `rl_agent.py` | Discrete CQL trainer and policy loader |
-| `train_macro_model.py` | Direct CLI for training an explicit NPZ dataset |
-| `live_client.py` | Local polling, features, and recommendations |
+| `src/offline_rift/workflow.py` | Collection/cache orchestration, patch catalogs, versioned datasets and runs |
+| `src/offline_rift/pipeline/data_pipeline.py` | Riot requests and causal 10-second snapshots |
+| `src/offline_rift/pipeline/features.py` | Shared feature schema, item valuation, objective estimates |
+| `src/offline_rift/pipeline/action_labeler.py` | Five weak macro labels, rewards, NPZ validation |
+| `src/offline_rift/training/rl_agent.py` | Discrete CQL trainer and policy loader |
+| `src/offline_rift/training/train_macro_model.py` | Direct CLI for training an explicit NPZ dataset |
+| `src/offline_rift/inference/live_client.py` | Local polling, features, and recommendations |
 
 ## Install and test
 
@@ -115,3 +117,5 @@ Minute-level frames are forward-filled onto the 10-second grid. The default live
 profile masks features unavailable from the Live Client API in training and serving.
 Objective timers are configurable estimates. Q-values are discounted-return estimates,
 not calibrated win probabilities.
+- **[Execution guide](docs/EXECUTION.md):** recollect, train, and run against an active game,
+  including Windows/WSL setup.

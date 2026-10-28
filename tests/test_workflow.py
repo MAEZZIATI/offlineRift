@@ -5,10 +5,10 @@ from unittest.mock import Mock
 
 import pytest
 
-from action_labeler import load_dataset
-from data_pipeline import TimelineProcessor
-from features import FeatureConfig
-from workflow import CatalogCache, ResearchWorkflow, atomic_json
+from offline_rift.pipeline.action_labeler import load_dataset
+from offline_rift.pipeline.data_pipeline import TimelineProcessor
+from offline_rift.pipeline.features import FeatureConfig
+from offline_rift.workflow import CatalogCache, ResearchWorkflow, atomic_json
 
 
 def prepare(tmp_path, match_payloads):

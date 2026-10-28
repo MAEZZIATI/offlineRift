@@ -6,9 +6,13 @@ import numpy as np
 import pytest
 import requests
 
-from data_pipeline import TimelineProcessor
-from features import ROLES, FeatureConfig, FeatureEncoder, ItemCatalog
-from live_client import LiveClientInference, LiveClientUnavailable, LiveStateAdapter
+from offline_rift.inference.live_client import (
+    LiveClientInference,
+    LiveClientUnavailable,
+    LiveStateAdapter,
+)
+from offline_rift.pipeline.data_pipeline import TimelineProcessor
+from offline_rift.pipeline.features import ROLES, FeatureConfig, FeatureEncoder, ItemCatalog
 
 
 def live_payload(timestamp=0):

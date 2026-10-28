@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from features import ROLES
+from offline_rift.pipeline.features import ROLES
 
 
 @pytest.fixture

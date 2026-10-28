@@ -1,11 +1,13 @@
 # Backend reference
 
 Prefer `workflow.py` for normal operation. Lower-level interfaces remain available.
+Implementation lives in `src/offline_rift/`; root modules preserve existing imports and
+script commands. See [Project structure](STRUCTURE.md).
 
 ## Ingestion
 
 ```python
-from data_pipeline import RiotDataIngestor
+from offline_rift.pipeline.data_pipeline import RiotDataIngestor
 
 api = RiotDataIngestor(api_key, "asia")
 try:
@@ -41,8 +43,8 @@ bundles. Policy loading checks the contract and model dimensions.
 ## Labels and MDP datasets
 
 ```python
-from action_labeler import MacroActionLabeler, MDPDatasetBuilder, load_dataset
-from features import FeatureConfig, ItemCatalog
+from offline_rift.pipeline.action_labeler import MacroActionLabeler, MDPDatasetBuilder, load_dataset
+from offline_rift.pipeline.features import FeatureConfig, ItemCatalog
 
 action, confidence = MacroActionLabeler().classify(snapshots[0], team=100)
 builder = MDPDatasetBuilder(FeatureConfig(), ItemCatalog(item_json), reward_mode="sparse")
@@ -77,7 +79,7 @@ observations are stored but never bootstrapped.
 ## Training and inference
 
 ```python
-from rl_agent import MacroPolicy, OfflineMacroTrainer
+from offline_rift.training.rl_agent import MacroPolicy, OfflineMacroTrainer
 
 trainer = OfflineMacroTrainer(device="cpu", batch_size=64, alpha=1.0, gamma=0.99, seed=42)
 report = trainer.train("custom.npz", "models/my-run", n_steps=10000)

@@ -5,16 +5,16 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from action_labeler import MDPDatasetBuilder, load_dataset
-from data_pipeline import TimelineProcessor
-from features import FeatureConfig, ItemCatalog
+from offline_rift.pipeline.action_labeler import MDPDatasetBuilder, load_dataset
+from offline_rift.pipeline.data_pipeline import TimelineProcessor
+from offline_rift.pipeline.features import FeatureConfig, ItemCatalog
 
 
 def test_cql_train_save_load_and_episode_alignment(tmp_path, match_payloads):
     pytest.importorskip("d3rlpy")
     import torch
 
-    from rl_agent import MacroPolicy, OfflineMacroTrainer
+    from offline_rift.training.rl_agent import MacroPolicy, OfflineMacroTrainer
 
     torch.set_num_threads(1)
     config = FeatureConfig()

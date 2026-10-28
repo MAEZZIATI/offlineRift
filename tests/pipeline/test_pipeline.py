@@ -7,9 +7,9 @@ import numpy as np
 import pytest
 import requests
 
-from action_labeler import MacroActionLabeler, MDPDatasetBuilder, load_dataset
-from data_pipeline import RiotAPIError, RiotDataIngestor, TimelineProcessor
-from features import (
+from offline_rift.pipeline.action_labeler import MacroActionLabeler, MDPDatasetBuilder, load_dataset
+from offline_rift.pipeline.data_pipeline import RiotAPIError, RiotDataIngestor, TimelineProcessor
+from offline_rift.pipeline.features import (
     PITS,
     ROLES,
     FeatureConfig,
