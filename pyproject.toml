@@ -20,7 +20,7 @@ rift-live = "offline_rift.inference.live_client:main"
 rift = "offline_rift.workflow:main"
 
 [tool.setuptools]
-py-modules = ["features", "data_pipeline", "action_labeler", "rl_agent", "train_macro_model", "live_client", "workflow"]
+py-modules = ["workflow", "data_pipeline", "action_labeler", "features", "rl_agent", "train_macro_model", "live_client"]
 
 [tool.setuptools.package-dir]
 "" = "."

@@ -90,6 +90,7 @@ a single poll. Outside an active local game, polling returns an offline status.
 | `src/offline_rift/training/rl_agent.py` | Discrete CQL trainer and policy loader |
 | `src/offline_rift/training/train_macro_model.py` | Direct CLI for training an explicit NPZ dataset |
 | `src/offline_rift/inference/live_client.py` | Local polling, features, and recommendations |
+| `scripts/` | Small compatibility launchers for the package commands |
 
 ## Install and test
 
@@ -103,8 +104,8 @@ pytest -q
 ruff check .
 ```
 
-After reinstalling the updated project, `rift` is an alias for `python workflow.py`.
-The Python command works immediately in the existing environment.
+Use `rift` for the workflow. Compatibility launchers are in `scripts/`, for example
+`python scripts/workflow.py status`. Import backend APIs from `offline_rift`.
 
 ## Interpretation
 

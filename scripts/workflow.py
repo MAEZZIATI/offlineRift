@@ -1,4 +1,4 @@
-"""Compatibility imports for :mod:`offline_rift.workflow`."""
+"""Compatibility entry point for :mod:`offline_rift.workflow`."""
 
 from offline_rift.workflow import (
     ROOT,

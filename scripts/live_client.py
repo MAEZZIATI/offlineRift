@@ -1,4 +1,4 @@
-"""Compatibility imports for :mod:`offline_rift.inference.live_client`."""
+"""Compatibility entry point for :mod:`offline_rift.inference.live_client`."""
 
 from offline_rift.inference.live_client import (
     ROLE_MAP,

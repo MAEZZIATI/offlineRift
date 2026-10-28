@@ -20,7 +20,7 @@ not establish useful strategy, optimality, or calibrated win probabilities.
 - `tests/`: deterministic fixtures, mocked transport, and short real optimizer tests.
 - `docs/`: workflow, backend contract, and results from specific real-data experiments.
 - `configs/`: tracked configuration examples; local `workflow.json` remains at the root.
-- Root Python files are compatibility entry points. Keep implementation in
+- `scripts/` contains compatibility entry points. Keep implementation in
   `src/offline_rift/` and import that package in new code and tests.
 
 ## Development conventions

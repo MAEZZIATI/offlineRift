@@ -1,4 +1,4 @@
-"""Compatibility imports for :mod:`offline_rift.pipeline.data_pipeline`."""
+"""Compatibility entry point for :mod:`offline_rift.pipeline.data_pipeline`."""
 
 from offline_rift.pipeline.data_pipeline import (
     REGIONS,

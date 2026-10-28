@@ -27,15 +27,15 @@ offlineRift/
   AGENTS.md                     # Repository conventions and validation instructions
   README.md                     # Setup and everyday commands
   pyproject.toml                # Dependencies, packaging, and command entry points
+  scripts/                      # Thin compatibility command launchers
   workflow.json                 # Local settings, ignored by Git
   data/                         # Local raw games, catalogs, datasets, manifests
   models/                       # Local learned weights and training reports
 ```
 
-The root `workflow.py`, `data_pipeline.py`, `action_labeler.py`, `features.py`,
-`rl_agent.py`, `train_macro_model.py`, and `live_client.py` are small compatibility
-modules. They re-export the existing public interfaces; script entry points delegate
-to the package. They do not duplicate implementation.
+The files in `scripts/` are small compatibility launchers. They re-export the existing
+public interfaces and delegate script entry points to the package. They do not duplicate
+implementation.
 
 ## Commands and imports
 
@@ -44,8 +44,8 @@ Existing commands remain supported:
 ```bash
 rift status
 rift run --refresh
-python workflow.py status
-python train_macro_model.py --help
+python scripts/workflow.py status
+python scripts/train_macro_model.py --help
 ```
 
 You can also run the workflow as a package:

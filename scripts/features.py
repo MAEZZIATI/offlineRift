@@ -1,4 +1,4 @@
-"""Compatibility imports for :mod:`offline_rift.pipeline.features`."""
+"""Compatibility entry point for :mod:`offline_rift.pipeline.features`."""
 
 from offline_rift.pipeline.features import (
     MAP_SIZE,

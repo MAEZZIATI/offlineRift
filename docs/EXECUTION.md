@@ -135,8 +135,8 @@ checkout instead of overwriting its `.venv`, for example:
 py -3.11 -m venv "$env:LOCALAPPDATA\OfflineRift\venv"
 $riftPython = "$env:LOCALAPPDATA\OfflineRift\venv\Scripts\python.exe"
 & $riftPython -m pip install -e '.[train]'
-& $riftPython live_client.py --model 'models\faker\YOUR_COMPLETED_RUN_ID' --team 100 --once
-& $riftPython live_client.py --model 'models\faker\YOUR_COMPLETED_RUN_ID' --team 100 --interval 10
+& $riftPython scripts\live_client.py --model 'models\faker\YOUR_COMPLETED_RUN_ID' --team 100 --once
+& $riftPython scripts\live_client.py --model 'models\faker\YOUR_COMPLETED_RUN_ID' --team 100 --interval 10
 ```
 
 Use the completed run directory displayed by `rift status`. The direct model path avoids

@@ -1,4 +1,4 @@
-"""Compatibility imports for :mod:`offline_rift.training.train_macro_model`."""
+"""Compatibility entry point for :mod:`offline_rift.training.train_macro_model`."""
 
 from offline_rift.training.train_macro_model import (
     main,
