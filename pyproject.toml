@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "offline-rift"
+version = "0.1.0"
+description = "Offline macro decision research prototype for Summoner's Rift"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.26,<3", "requests>=2.31,<3", "pandas>=2.0,<3"]
+
+[project.optional-dependencies]
+train = ["d3rlpy==2.8.1", "torch>=2.5,<3"]
+dev = ["pytest>=8,<9", "ruff>=0.9"]
+
+[project.scripts]
+rift-collect = "data_pipeline:main"
+rift-train = "train_macro_model:main"
+rift-live = "live_client:main"
+rift = "workflow:main"
+
+[tool.setuptools]
+py-modules = ["features", "data_pipeline", "action_labeler", "rl_agent", "train_macro_model", "live_client", "workflow"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

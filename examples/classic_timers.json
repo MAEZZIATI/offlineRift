@@ -1,0 +1,10 @@
+{
+  "profile": "live",
+  "interval_seconds": 10,
+  "grid_size": 4,
+  "first_spawns": {"dragon": 300, "baron": 1200, "herald": 840},
+  "respawns": {"dragon": 300, "baron": 360, "herald": 360},
+  "herald_despawn": 1170,
+  "epic_buff_durations": {"baron": 180, "elder": 150},
+  "item_spike_gold": 2500
+}
