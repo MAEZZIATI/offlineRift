@@ -38,7 +38,7 @@ rift ui --transport local
 ```
 
 `--team` selects the initial side; switching sides in the browser reuses the same
-observation. `--interval` defaults to 10 seconds and must be at least 2. If the port
+observation. `--interval` defaults to 30 seconds and must be at least 2. If the port
 is occupied, choose another port and open its printed URL.
 
 When the connection is offline during a match, check the game API from Windows PowerShell:
@@ -91,7 +91,12 @@ agreement, majority baseline, and validation prediction counts from the loaded m
 metadata. Missing metrics are shown as unrecorded. A visible warning flags collapsed
 validation predictions or a training label exceeding 80% of observations.
 
-The current saved baseline chose the fallback action on every validation state. A
+The historical five-action baseline chose the fallback on every validation state. A
 working live dashboard does not establish useful strategy or win-rate improvement.
 Coordinates, team total gold, and reliable ability cooldowns remain unavailable and
-masked; objective timing remains an explicit estimate. See [the recorded results](RESULTS.md).
+masked; objective timing remains an explicit estimate. See [current experiments](RESULTS_V2.md) and the [historical results](RESULTS.md).
+
+The current hybrid model displays balanced macro ranking scores rather than raw Q-values.
+Hover over a score row to see its discounted-return Q estimate. These scores are not
+probabilities. Model details include balanced accuracy and macro F1 alongside majority
+baseline and heuristic agreement. Every validation metric concerns weak labels.

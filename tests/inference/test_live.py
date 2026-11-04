@@ -37,7 +37,7 @@ def fake_policy(profile="live"):
     policy = Mock()
     policy.config = FeatureConfig(profile=profile)
     policy.encoder = FeatureEncoder(policy.config, ItemCatalog())
-    policy.recommend.return_value = {"action_id": 3, "action": "Group & Push Mid", "q_value": 0.2}
+    policy.recommend.return_value = {"action_id": 5, "action": "Group mid", "q_value": 0.2}
     return policy
 
 

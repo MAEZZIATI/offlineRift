@@ -18,7 +18,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from offline_rift.pipeline.action_labeler import ACTION_NAMES, MDPDatasetBuilder, load_dataset
+from offline_rift.pipeline.action_labeler import MDPDatasetBuilder, load_dataset
 from offline_rift.pipeline.data_pipeline import REGIONS, RiotDataIngestor, TimelineProcessor
 from offline_rift.pipeline.features import FeatureConfig, FeatureEncoder, ItemCatalog
 
@@ -180,21 +180,22 @@ class ResearchWorkflow:
                 "gamma": 0.99,
                 "seed": 42,
                 "validation_fraction": 0.2,
+                "encoder_type": "team_set",
+                "prediction_mode": "hybrid",
             },
         }
         atomic_json(config_path, config)
         return cls(config_path)
 
     def raw_records(self):
-        """Only this player's selected queue; deduplicate by embedded match ID."""
+        """Only configured PUUIDs in the selected queue; deduplicate shared matches."""
+        puuids = {p["puuid"] for p in self.players()}
         seen = set()
         for path in sorted(self.path("raw").glob("*.json")):
             payload = read_json(path)
             match = payload["match"]
             info = match["info"]
-            if not any(
-                p.get("puuid") == self.config["player"]["puuid"] for p in info["participants"]
-            ):
+            if not any(p.get("puuid") in puuids for p in info["participants"]):
                 continue
             queue = self.config["collection"]["queue"]
             if queue is not None and info.get("queueId") != queue:
@@ -207,20 +208,52 @@ class ResearchWorkflow:
             seen.add(match_id)
             yield path, payload
 
-    def collect(self, *, count: int | None = None, start: int = 0, api=None) -> dict:
+    def players(self) -> list[dict]:
+        return [self.config["player"], *self.config.get("additional_players", [])]
+
+    def add_player(self, riot_id: str, region: str, *, api=None) -> dict:
+        region = REGIONS.get(region.lower(), region.lower())
+        if region not in {"americas", "europe", "asia", "sea"}:
+            raise ValueError("Invalid region")
+        own_api = api is None
+        api = api or RiotDataIngestor(os.environ.get("RIOT_API_KEY", ""), region)
+        try:
+            account = api.resolve_account(riot_id)
+        finally:
+            if own_api:
+                api.close()
+        player = {
+            "puuid": account["puuid"],
+            "riot_id": f"{account['gameName']}#{account['tagLine']}",
+            "region": region,
+        }
+        if any(p["puuid"] == player["puuid"] for p in self.players()):
+            raise ValueError("This PUUID is already configured")
+        self.config.setdefault("additional_players", []).append(player)
+        atomic_json(self.config_path, self.config)
+        return player
+
+    def collect(
+        self, *, count: int | None = None, start: int = 0, player: str | None = None, api=None
+    ) -> dict:
+        selected = self.config["player"]
+        if player is not None:
+            matches = [p for p in self.players() if player in {p["puuid"], p["riot_id"]}]
+            if len(matches) != 1:
+                raise ValueError("Select one configured Riot ID or PUUID; use add-player first")
+            selected = matches[0]
         count = self.config["collection"]["count"] if count is None else count
         if count <= 0 or start < 0:
             raise ValueError("count must be positive and start nonnegative")
         own_api = api is None
-        api = api or RiotDataIngestor(
-            os.environ.get("RIOT_API_KEY", ""), self.config["player"]["region"]
-        )
+        api = api or RiotDataIngestor(os.environ.get("RIOT_API_KEY", ""), selected["region"])
         batch_id = run_id()
         manifest = {
             "batch_id": batch_id,
             "status": "running",
             "start": start,
             "requested_count": count,
+            "player": selected,
             "discovered": [],
             "downloaded": [],
             "reused": [],
@@ -230,7 +263,7 @@ class ResearchWorkflow:
         try:
             for offset in range(0, count, 100):
                 ids = api.fetch_match_ids(
-                    self.config["player"]["puuid"],
+                    selected["puuid"],
                     start=start + offset,
                     count=min(100, count - offset),
                     queue=self.config["collection"]["queue"],
@@ -308,6 +341,7 @@ class ResearchWorkflow:
                     "overrides": self.config["feature_overrides_by_patch"],
                     "reward": self.config["reward_mode"],
                     "catalogs": {p: v[1:] for p, v in catalogs.items()},
+                    "source_players": self.players(),
                 },
                 sort_keys=True,
             ).encode()
@@ -317,6 +351,7 @@ class ResearchWorkflow:
             "pipeline/features.py",
             "pipeline/data_pipeline.py",
             "pipeline/action_labeler.py",
+            "pipeline/actions.py",
         ):
             digest.update((ROOT / module).read_bytes())
         for path, _ in records:
@@ -389,9 +424,13 @@ class ResearchWorkflow:
             "transitions": len(arrays["actions"]),
             "low_confidence_label_fraction": float(np.mean(arrays["label_confidence"] < 0.5)),
             "action_counts": {
-                ACTION_NAMES[i]: int(n)
-                for i, n in enumerate(np.bincount(arrays["actions"], minlength=5))
+                builder.action_names[i]: int(n)
+                for i, n in enumerate(
+                    np.bincount(arrays["actions"], minlength=len(builder.action_names))
+                )
             },
+            "action_schema": builder.action_schema,
+            "source_players": self.players(),
             "match_ids": accepted,
             "skipped": skipped,
             **provenance,
@@ -411,6 +450,8 @@ class ResearchWorkflow:
             ).encode()
         )
         signature.update((ROOT / "training/rl_agent.py").read_bytes())
+        for module in ("encoders.py", "macro_predictor.py", "evaluation.py"):
+            signature.update((ROOT / "training" / module).read_bytes())
         fingerprint = signature.hexdigest()
         state = self.state()
         old = state.get("model", {})
@@ -419,6 +460,10 @@ class ResearchWorkflow:
             and old.get("fingerprint") == fingerprint
             and (Path(old.get("path", "")) / "policy.d3").is_file()
             and (Path(old["path"]) / "metadata.json").is_file()
+            and (
+                options.get("prediction_mode", "hybrid") == "cql"
+                or (Path(old["path"]) / "macro_predictor.pt").is_file()
+            )
         ):
             LOG.info("Training unchanged: reusing %s", old["path"])
             return old
@@ -430,6 +475,8 @@ class ResearchWorkflow:
         torch.set_num_threads(threads)
         output = self.path("models") / run_id()
         settings = {k: options.pop(k) for k in ("device", "batch_size", "alpha", "gamma", "seed")}
+        settings["encoder_type"] = options.pop("encoder_type", "team_set")
+        settings["prediction_mode"] = options.pop("prediction_mode", "hybrid")
         output.mkdir(parents=True, exist_ok=False)
         manifest = {
             "path": str(output.resolve()),
@@ -465,6 +512,7 @@ class ResearchWorkflow:
         return {
             "project": self.config["name"],
             "player": self.config["player"]["riot_id"],
+            "players": self.players(),
             "region": self.config["player"]["region"],
             "cached_matches": matches,
             "patches": dict(patches),
@@ -489,6 +537,12 @@ def main():
     collect = sub.add_parser("collect", help="Fetch history, skipping cached match payloads")
     collect.add_argument("--count", type=int)
     collect.add_argument("--start", type=int, default=0)
+    collect.add_argument(
+        "--player", help="Configured Riot ID or PUUID; defaults to the primary player"
+    )
+    add_player = sub.add_parser("add-player", help="Resolve a Riot ID and add its verified PUUID")
+    add_player.add_argument("--riot-id", required=True)
+    add_player.add_argument("--region", required=True)
     build = sub.add_parser("build", help="Build a versioned dataset from all cached matches")
     build.add_argument("--refresh-catalogs", action="store_true")
     train = sub.add_parser("train", help="Build if needed and train if data/settings changed")
@@ -499,7 +553,9 @@ def main():
     run.add_argument("--retrain", action="store_true")
     live = sub.add_parser("live", help="Poll using the latest completed live-compatible policy")
     live.add_argument("--team", type=int, choices=(100, 200), default=100)
-    live.add_argument("--interval", type=float, default=10)
+    live.add_argument(
+        "--interval", type=float, default=30, help="Live refresh interval in seconds (default: 30)"
+    )
     live.add_argument("--once", action="store_true")
     live.add_argument("--ca-bundle")
     live.add_argument("--transport", choices=TRANSPORTS, default="auto")
@@ -530,8 +586,11 @@ def main():
             if status["model"]:
                 status["model"] = {k: status["model"][k] for k in ("path", "status", "dataset_id")}
             print(json.dumps(status, indent=2))
+        elif args.command == "add-player":
+            player = workflow.add_player(args.riot_id, args.region)
+            print(f"Added {player['riot_id']} ({player['region']})")
         elif args.command == "collect":
-            batch = workflow.collect(count=args.count, start=args.start)
+            batch = workflow.collect(count=args.count, start=args.start, player=args.player)
             print(
                 f"Batch {batch['batch_id']}: {len(batch['downloaded'])} new, "
                 f"{len(batch['reused'])} cached"

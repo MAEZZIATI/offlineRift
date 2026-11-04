@@ -121,7 +121,7 @@ environment on the game's operating system, or in WSL with Windows interop enabl
 
 ```bash
 rift live --team 100 --once
-rift live --team 100 --interval 10
+rift live --team 100 --interval 30
 ```
 
 Use team 100 for blue/ORDER and 200 for red/CHAOS. `--once` performs a single check; the
@@ -185,8 +185,9 @@ Use an installed supported Python version if 3.11 is unavailable; the project re
 
 ## 5. Interpret a live result
 
-The UI shows the selected macro and all five Q-values. Successful terminal output
-contains an action ID/name, a selected Q-value, five action values, game
+The UI shows the selected macro and all twelve ranking scores, with Q estimates on
+hover. Hybrid scores and Q-values are separate; neither is a probability. Successful terminal output
+contains an action ID/name, a selected Q-value, twelve action values, game
 time, team, and `partial_observation` status. The live API lacks coordinates, team total
 gold, and reliable ability cast history; those features are masked consistently with the
 training profile. Q-values are discounted-return estimates, not win probabilities.

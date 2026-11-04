@@ -59,8 +59,29 @@ If 5 new games appeared in a window of 100, the workflow normally reuses 95 and 
 Counts above 100 paginate automatically in pages of at most 100. A short page ends the
 scan; Riot controls how much history is available. Older-history offsets refer to the
 current match list, so repeat scans can overlap. Embedded match IDs prevent duplicates.
-The dataset selects only the configured PUUID/queue, even if the raw directory contains
-other players' histories.
+The dataset selects the primary and explicitly added PUUIDs in the configured queue.
+Other players’ histories are excluded. Shared matches appear once.
+
+## Add Chovy's requested account
+
+```bash
+rift add-player --riot-id '허거덩#0303' --region kr
+rift collect --player '허거덩#0303' --count 100
+rift run
+```
+
+`add-player` uses Riot Account-V1 to resolve the supplied Riot ID to a PUUID before
+atomically storing it under `additional_players` in local `workflow.json`. It preserves
+the primary account. The collector uses that PUUID, queue 420 and Asia Match-V5 routing.
+It records the selected identity in each resumable batch manifest. A 100-game request
+scans the latest available ranked history; shared matches reuse cached payloads and a
+short Riot history may yield fewer than 100. `run --refresh` still refreshes the primary
+player only; select the other player explicitly for collection.
+
+Professional attribution is supplied by the user; Account-V1 verifies the account,
+not the identity of the human behind it. Ranked solo queue does not prove that a
+team's formation was that player's decision. Keep both teams and avoid treating every
+teammate/opponent action as an expert demonstration.
 
 ## Configuration
 
@@ -70,6 +91,7 @@ other players' histories.
 |---|---|
 | `name` | Project label for generated dataset IDs |
 | `player.puuid`, `player.riot_id`, `player.region` | Collection identity and routing |
+| `additional_players` | Extra accounts resolved by `add-player`; original PUUID preserved |
 | `collection.count` | Recent-history window size |
 | `collection.queue` | Queue filter; 420 is ranked solo/duo; null disables filtering |
 | `paths.raw`, `paths.catalogs` | Raw JSON and patch catalog cache locations |
@@ -86,6 +108,8 @@ other players' histories.
 | `training.n_steps_per_epoch` | Desired logging/checkpoint interval |
 | `training.batch_size`, `training.device`, `training.cpu_threads` | Compute settings |
 | `training.alpha`, `training.gamma`, `training.seed` | CQL penalty, discount, seed |
+| `training.prediction_mode` | `hybrid` (default), `balanced_bc`, or raw `cql` |
+| `training.encoder_type` | `team_set` (default) or `mlp` for ablation |
 | `training.validation_fraction` | Match-level validation fraction |
 
 Example: increase `training.n_steps` from 10000 to 20000 and run the same command.
@@ -193,7 +217,7 @@ the dataset does not claim to capture that player's personal intended decisions.
 ```bash
 rift ui
 # Or terminal JSON:
-rift live --team 100 --interval 10
+rift live --team 100 --interval 30
 ```
 
 The dashboard uses the latest completed model and lets you switch sides without

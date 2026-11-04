@@ -10,8 +10,12 @@ offlineRift/
       data_pipeline.py          # Riot requests and timeline reconstruction
       features.py               # Shared state schema and objective/item features
       action_labeler.py         # Weak labels and MDP dataset validation
+      actions.py                # Current versioned macro action contract
     training/
-      rl_agent.py               # CQL training and policy persistence
+      rl_agent.py               # CQL + balanced predictor training and policy bundles
+      encoders.py               # Serializable neural team set encoder
+      macro_predictor.py        # Weighted classifier and bounded hybrid ranking
+      evaluation.py             # Per-action diagnostics and balanced metrics
       train_macro_model.py      # Direct training CLI
     inference/
       live_client.py            # Local live-game adaptation and polling
@@ -79,10 +83,9 @@ entry points resolve correctly:
 uv pip install -e '.[train,dev]'
 ```
 
-The configuration schema, collection behavior, features, labels, rewards, and training
-algorithm are unchanged by this reorganization. Existing
-`workflow.json`, raw matches, datasets, models, and latest-artifact references keep their
-original locations. Nothing is retrained or recollected as part of the move.
+Local settings and artifacts retain their original locations. The current `rift-v2` /
+`macro-v2` model requires rebuilding and retraining older bundles; stored history remains
+on disk. See [model improvements](MODEL_IMPROVEMENTS.md) for the current contract.
 
 Source hashes participate in dataset/model fingerprints. The next explicit build/run
 can therefore create a new artifact after this source-layout change; previous artifacts

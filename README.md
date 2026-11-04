@@ -1,6 +1,6 @@
 # Offline Rift
 
-A Python backend for collecting League Match-V5 timelines, labeling five team macro
+A Python backend for collecting League Match-V5 timelines, labeling twelve team macro
 actions, training discrete offline CQL, and polling the local Live Client API.
 
 The main workflow uses **your real cached matches**. There is no synthetic-data step.
@@ -76,13 +76,13 @@ rift ui
 ```
 
 Open **http://localhost:8765** in your browser. Choose blue or red side to see the
-latest model suggestion, five action values, game clock, and model limitations.
+latest model suggestion, twelve macro ranking scores, game clock, and model limitations.
 The dashboard waits for an active 5v5 Summoner's Rift match; no model path or Riot
 API key is needed. Stop the command with Ctrl-C.
 
 The UI is plain HTML/CSS/JavaScript in `src/offline_rift/ui/static/`, served by a
 small Python standard-library server. It loads one CPU model, shares one cached
-game fetch across tabs, refreshes every 10 seconds, and pauses hidden tabs. No Node,
+game fetch across tabs, refreshes every 30 seconds, and pauses hidden tabs. No Node,
 frontend build, cloud service, or new runtime dependency is required.
 
 On WSL, `auto` transport uses Windows `curl.exe` when available to read the Windows
@@ -95,7 +95,8 @@ The terminal interface remains available: `rift live --team 100 --once`.
 - **[Workflow guide](docs/WORKFLOW.md):** commands, editable configuration, patch updates,
   artifact layout, interruption recovery, reports, and limitations.
 - **[Backend reference](docs/BACKEND.md):** modules, Python interfaces, features, MDP arrays.
-- **[First real-data results](docs/RESULTS.md):** the 100-match baseline and its limitations.
+- **[Current real-data results](docs/RESULTS_V2.md):** the 200-match model and controlled prediction comparisons.
+- **[First real-data results](docs/RESULTS.md):** the historical 100-match baseline and its limitations.
 - **[Project structure](docs/STRUCTURE.md):** package layout, compatibility entry points,
   and locations for configuration and generated artifacts.
 
@@ -104,7 +105,7 @@ The terminal interface remains available: `rift live --team 100 --once`.
 | `src/offline_rift/workflow.py` | Collection/cache orchestration, patch catalogs, versioned datasets and runs |
 | `src/offline_rift/pipeline/data_pipeline.py` | Riot requests and causal 10-second snapshots |
 | `src/offline_rift/pipeline/features.py` | Shared feature schema, item valuation, objective estimates |
-| `src/offline_rift/pipeline/action_labeler.py` | Five weak macro labels, rewards, NPZ validation |
+| `src/offline_rift/pipeline/action_labeler.py` | Twelve weak macro labels, rewards, NPZ validation |
 | `src/offline_rift/training/rl_agent.py` | Discrete CQL trainer and policy loader |
 | `src/offline_rift/training/train_macro_model.py` | Direct CLI for training an explicit NPZ dataset |
 | `src/offline_rift/inference/live_client.py` | Local polling, features, and recommendations |
@@ -140,3 +141,9 @@ Objective timers are configurable estimates. Q-values are discounted-return esti
 not calibrated win probabilities.
 - **[Execution guide](docs/EXECUTION.md):** recollect, train, and run against an active game,
   including Windows/WSL setup.
+
+The current `rift-v2` / `macro-v2` implementation requires rebuilding and retraining
+old bundles with `rift run`. Historical artifacts remain on disk. See
+[model improvement directions and research](docs/MODEL_IMPROVEMENTS.md) for the action
+contract, deep set encoder, experiment protocol, limitations, and proposed innovations.
+To add the requested second account, follow [the multi-player workflow](docs/WORKFLOW.md#add-chovys-requested-account).

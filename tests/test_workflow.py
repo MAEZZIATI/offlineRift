@@ -140,3 +140,39 @@ def test_training_is_versioned_and_unchanged_runs_are_reused(tmp_path, match_pay
     assert first["report"]["optimizer_steps"] == 3  # No rounding down incomplete epochs.
     second = workflow.train(dataset, force=True)
     assert second["path"] != first["path"]
+
+
+def test_add_verified_player_collect_and_deduplicate_combined_corpus(tmp_path, match_payloads):
+    workflow = prepare(tmp_path, match_payloads)
+    primary = workflow.config["player"].copy()
+    api = Mock()
+    api.resolve_account.return_value = {
+        "puuid": "chovy-puuid",
+        "gameName": "허거덩",
+        "tagLine": "0303",
+    }
+    player = workflow.add_player("허거덩#0303", "kr", api=api)
+    assert player["region"] == "asia"
+    assert workflow.config["player"] == primary
+    assert ResearchWorkflow(workflow.config_path).players() == [primary, player]
+    with pytest.raises(ValueError, match="already configured"):
+        workflow.add_player("허거덩#0303", "kr", api=api)
+    with pytest.raises(ValueError, match="configured"):
+        workflow.collect(player="unverified-name", api=api)
+
+    match, timeline = match_payloads("KR_chovy")
+    match["info"].update(queueId=420, gameVersion="16.19.123.456")
+    match["info"]["participants"][0]["puuid"] = "chovy-puuid"
+    api.fetch_match_ids.return_value = ["KR_0", "KR_chovy", "KR_chovy"]
+    api.fetch_match.return_value = match
+    api.fetch_timeline.return_value = timeline
+    batch = workflow.collect(count=100, player="허거덩#0303", api=api)
+    assert batch["downloaded"] == ["KR_chovy"]
+    assert batch["reused"] == ["KR_0"]
+    assert batch["player"] == player
+    api.fetch_match_ids.assert_called_once_with("chovy-puuid", start=0, count=100, queue=420)
+    report = workflow.build()
+    assert report["matches"] == 4
+    assert report["source_players"] == [primary, player]
+    arrays, _ = load_dataset(report["path"])
+    assert len(set(arrays["match_ids"])) == 4

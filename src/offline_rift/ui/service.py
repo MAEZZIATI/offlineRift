@@ -8,7 +8,7 @@ import time
 from copy import deepcopy
 
 from offline_rift.inference.live_client import LiveClientInference, LiveClientUnavailable
-from offline_rift.pipeline.action_labeler import ACTION_NAMES
+from offline_rift.pipeline.actions import action_names
 
 LOG = logging.getLogger(__name__)
 
@@ -24,6 +24,9 @@ def model_summary(metadata: dict) -> dict:
         "heuristic_agreement": report.get("validation_heuristic_agreement"),
         "majority_baseline": report.get("validation_majority_baseline"),
         "prediction_counts": predictions,
+        "balanced_accuracy": report.get("validation_balanced_accuracy"),
+        "macro_f1": report.get("validation_macro_f1"),
+        "prediction_method": report.get("prediction_mode"),
     }
 
 
@@ -53,7 +56,7 @@ class LiveDashboard:
             "checked_at": time.time(),
             "recommendations": {},
             "model": self.model,
-            "actions": ACTION_NAMES,
+            "actions": action_names(self.client.policy.metadata),
             "transport": self.client.source.transport,
             "default_team": self.client.team,
             "interval_seconds": self.client.interval_seconds,

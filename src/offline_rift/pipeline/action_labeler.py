@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
+from offline_rift.pipeline.actions import ACTION_NAMES, ACTION_SCHEMA, action_names
 from offline_rift.pipeline.features import (
     MAP_SIZE,
     PITS,
@@ -18,20 +19,12 @@ from offline_rift.pipeline.features import (
     Snapshot,
 )
 
-ACTION_NAMES = {
-    0: "Force/Bait Objective",
-    1: "Cross-map Play",
-    2: "Split Push & Stall",
-    3: "Group & Push Mid",
-    4: "Defensive Reset & Setup Vision",
-}
-
 
 class MacroActionLabeler:
-    """Geometric weak supervision, not ground-truth intent or observed vision.
+    """Geometric weak supervision; neither ground-truth intent nor observed vision.
 
-    Priority is objective > cross-map > split > mid > fallback. Forward-filled
-    coordinates provide coarse evidence; confidence is reduced for stale frames.
+    Priority: base > available objective area > cross-map > split > defense >
+    lane group > dispersed coverage > unclassified. No future state is used.
     """
 
     def __init__(
@@ -46,50 +39,67 @@ class MacroActionLabeler:
     def classify(self, snapshot: Snapshot, team: int) -> tuple[int, float]:
         if team not in (100, 200):
             raise ValueError("team must be 100 or 200")
-        allies = [
-            p["position"]
-            for p in snapshot.players
-            if p["team"] == team and p.get("position") is not None
+        sides = [
+            [p.get("position") for p in snapshot.players if p["team"] == t]
+            for t in (team, 300 - team)
         ]
-        enemies = [
-            p["position"]
-            for p in snapshot.players
-            if p["team"] != team and p.get("position") is not None
-        ]
-        if len(allies) != 5 or len(enemies) != 5 or snapshot.frame_age > self.max_frame_age:
-            return 4, 0.1
+        if any(len(s) != 5 or any(p is None for p in s) for s in sides):
+            return 11, 0.1
+        if snapshot.frame_age > self.max_frame_age:
+            return 11, 0.1
+        allies, enemies = sides
         confidence = max(0.25, 0.9 - snapshot.frame_age / 120)
         base = (0, 0) if team == 100 else (MAP_SIZE, MAP_SIZE)
         active = [p for p in allies if self._distance(p, base) > 2200]
+        if len(active) <= 2:
+            return 9, confidence  # Presence at base is observable; a recall is not.
+        for action, kind in enumerate(PITS):
+            obj = snapshot.objectives[kind]
+            if (
+                obj["enabled"]
+                and obj["eta"] <= 60
+                and sum(self._distance(p, PITS[kind]) <= self.pit_radius for p in active) >= 3
+            ):
+                return action, confidence
+
+        def forward(p):
+            return sum(p) > MAP_SIZE if team == 100 else sum(p) < MAP_SIZE
+
+        side_pressure = [p for p in active if abs(p[0] - p[1]) > self.mid_width and forward(p)]
         for kind, pit in PITS.items():
             obj = snapshot.objectives[kind]
             if (
                 obj["enabled"]
                 and obj["eta"] <= 60
-                and sum(self._distance(p, pit) <= self.pit_radius for p in active) >= 3
+                and sum(self._distance(p, pit) <= self.pit_radius for p in enemies) >= 3
+                and any(self._distance(p, pit) > 6500 for p in side_pressure)
             ):
-                return 0, confidence
-
-        # Pressure means occupying the opponent's half of a side lane.
-        def pressure(p):
-            return abs(p[0] - p[1]) > self.mid_width and (
-                sum(p) > MAP_SIZE if team == 100 else sum(p) < MAP_SIZE
-            )
-
-        for pit in (PITS["dragon"], PITS["baron"]):
-            if sum(self._distance(p, pit) <= self.pit_radius for p in enemies) >= 3:
-                if any(pressure(p) and self._distance(p, pit) > 6500 for p in active):
-                    return 1, confidence
-                opposite = PITS["baron"] if pit == PITS["dragon"] else PITS["dragon"]
-                if sum(self._distance(p, opposite) <= self.pit_radius for p in active) >= 2:
-                    return 1, confidence
+                return 3, confidence
+        # Three or four together plus isolated side pressure supports both 1-4 and 1-3-1.
         mid = [p for p in active if abs(p[0] - p[1]) <= self.mid_width]
-        side = [p for p in active if pressure(p)]
-        if len(mid) == 4 and len(side) == 1:
-            return 2, confidence
+        if len(mid) >= 3 and 1 <= len(side_pressure) <= 2:
+            return 4, confidence
+        own_half = [p for p in active if not forward(p)]
+        if len(own_half) >= 3 and sum(not forward(p) for p in enemies) >= 3:
+            return 8, confidence
         if len(mid) >= 3:
-            return 3, confidence
-        return 4, min(0.4, confidence)  # Vision placement/recall intent is not observable.
+            return 5, confidence
+        if sum(p[1] - p[0] > self.mid_width for p in active) >= 3:
+            return 6, confidence
+        if sum(p[0] - p[1] > self.mid_width for p in active) >= 3:
+            return 7, confidence
+        # Distinct occupied bands support coverage, but not farming/rotation intent.
+        if (
+            len(
+                {
+                    0 if abs(p[0] - p[1]) <= self.mid_width else (1 if p[1] > p[0] else 2)
+                    for p in active
+                }
+            )
+            == 3
+        ):
+            return 10, min(confidence, 0.6)
+        return 11, min(confidence, 0.3)
 
     def label(self, snapshot: Snapshot, team: int) -> int:
         return self.classify(snapshot, team)[0]
@@ -98,7 +108,7 @@ class MacroActionLabeler:
         if not window:
             raise ValueError("Empty window")
         labels = [self.label(snapshot, team) for snapshot in window]
-        return int(np.bincount(labels, minlength=5).argmax())
+        return int(np.bincount(labels).argmax())
 
 
 class MDPDatasetBuilder:
@@ -115,6 +125,8 @@ class MDPDatasetBuilder:
         self.config, self.catalog = config, catalog
         self.encoder = FeatureEncoder(config, catalog)
         self.labeler = MacroActionLabeler()
+        self.action_schema = ACTION_SCHEMA
+        self.action_names = ACTION_NAMES
         self.reward_mode, self.gold_scale = reward_mode, gold_scale
         self.rows: list[dict] = []
         self.match_ids: set[str] = set()
@@ -182,7 +194,8 @@ class MDPDatasetBuilder:
                     "schema_version": SCHEMA_VERSION,
                     "feature_names": self.encoder.names,
                     "feature_config": self.config.to_dict(),
-                    "action_names": ACTION_NAMES,
+                    "action_names": self.action_names,
+                    "action_schema": self.action_schema,
                     "reward_mode": self.reward_mode,
                     "gold_scale": self.gold_scale,
                     "item_catalog": self.catalog.data,
@@ -209,6 +222,7 @@ def load_dataset(path: str | Path) -> tuple[dict[str, np.ndarray], dict]:
             "metadata",
             "timestamps",
             "next_timestamps",
+            "label_confidence",
         }
         if not required.issubset(archive.files):
             raise ValueError("Dataset is missing required arrays")
@@ -220,6 +234,7 @@ def load_dataset(path: str | Path) -> tuple[dict[str, np.ndarray], dict]:
     if metadata["schema_version"] != SCHEMA_VERSION or metadata["feature_names"] != encoder.names:
         raise ValueError("Incompatible feature schema")
     n = len(arrays["actions"])
+    names = action_names(metadata)
     if n == 0 or any(len(value) != n for value in arrays.values()):
         raise ValueError("Empty or misaligned transition arrays")
     if arrays["observations"].shape != (n, len(encoder.names)) or (
@@ -240,10 +255,17 @@ def load_dataset(path: str | Path) -> tuple[dict[str, np.ndarray], dict]:
     for key in ("observations", "next_observations", "rewards", "timestamps", "next_timestamps"):
         if not np.isfinite(arrays[key]).all():
             raise ValueError(f"Non-finite {key}")
-    if not np.issubdtype(arrays["actions"].dtype, np.integer) or np.any(
-        (arrays["actions"] < 0) | (arrays["actions"] >= 5)
+    confidence = arrays["label_confidence"]
+    if (
+        confidence.shape != (n,)
+        or not np.isfinite(confidence).all()
+        or np.any((confidence < 0) | (confidence > 1))
     ):
-        raise ValueError("Actions must be integers in [0,4]")
+        raise ValueError("Invalid label confidence")
+    if not np.issubdtype(arrays["actions"].dtype, np.integer) or np.any(
+        (arrays["actions"] < 0) | (arrays["actions"] >= len(names))
+    ):
+        raise ValueError("Actions must be integers within the action contract")
     if not np.isin(arrays["terminals"], [0, 1]).all():
         raise ValueError("Invalid terminal flags")
     seen = set()

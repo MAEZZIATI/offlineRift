@@ -50,16 +50,16 @@
           <dl class="session-facts">
             <div><dt>Observation</dt><dd id="observation">Waiting</dd></div>
             <div><dt>Game connection</dt><dd id="transport">Detecting</dd></div>
-            <div><dt>Refresh interval</dt><dd id="interval">10 seconds</dd></div>
+            <div><dt>Refresh interval</dt><dd id="interval">30 seconds</dd></div>
             <div><dt>Last check</dt><dd id="last-check">—</dd></div>
           </dl>
           <p class="session-note">Updates pause when this tab is hidden. No game history is stored by this dashboard.</p>
         </aside>
 
         <section class="values panel" aria-labelledby="values-title">
-          <div class="panel-top"><h2 id="values-title">The five options</h2><span class="muted small">Q-VALUE</span></div>
+          <div class="panel-top"><h2 id="values-title">Macro options</h2><span id="score-label" class="muted small">MACRO SCORE</span></div>
           <ol class="action-list" id="action-list"></ol>
-          <p class="values-note">Q-values estimate discounted return. They are <strong>not win probabilities</strong> or confidence scores.</p>
+          <p id="score-note" class="values-note">Scores rank predicted macro patterns. They are <strong>not win probabilities</strong> or calibrated confidence.</p>
         </section>
 
         <section class="context panel" aria-labelledby="context-title">
@@ -72,6 +72,8 @@
               <div><dt>Training action coverage</dt><dd id="coverage">—</dd></div>
               <div><dt>Heuristic agreement</dt><dd id="agreement">—</dd></div>
               <div><dt>Majority baseline</dt><dd id="baseline">—</dd></div>
+              <div><dt>Balanced accuracy</dt><dd id="balanced-accuracy">—</dd></div>
+              <div><dt>Macro F1</dt><dd id="macro-f1">—</dd></div>
             </dl>
             <p id="distribution"></p>
             <p id="predictions"></p>

@@ -105,7 +105,7 @@ class LiveClientInference:
         *,
         team: int = 100,
         endpoint: str = DEFAULT_ENDPOINT,
-        interval_seconds: float = 10,
+        interval_seconds: float = 30,
         timeout: float = 3,
         verify_tls: bool | str = False,
         session: requests.Session | None = None,
@@ -189,7 +189,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--team", type=int, choices=(100, 200), default=100)
-    parser.add_argument("--interval", type=float, default=10)
+    parser.add_argument(
+        "--interval", type=float, default=30, help="Live refresh interval in seconds (default: 30)"
+    )
     parser.add_argument("--endpoint", default=DEFAULT_ENDPOINT)
     parser.add_argument("--transport", choices=TRANSPORTS, default="auto")
     parser.add_argument("--ca-bundle", help="Optional Riot root certificate for TLS verification")

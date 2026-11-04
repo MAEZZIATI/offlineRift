@@ -96,23 +96,77 @@ def make_geometry(allies, enemies):
     "allies,enemies,expected",
     [
         ([PITS["dragon"]] * 3 + [(7000, 7000)] * 2, [(10000, 10000)] * 5, 0),
-        ([(3000, 14000)] + [(2000, 2000)] * 4, [PITS["dragon"]] * 5, 1),
-        ([(3000, 14000)] + [(7000, 7000)] * 4, [(11000, 11000)] * 5, 2),
-        ([(7000, 7000)] * 5, [(11000, 11000)] * 5, 3),
-        ([(500, 500)] * 5, [(11000, 11000)] * 5, 4),
+        ([(3000, 14000)] + [(2000, 2000)] * 4, [PITS["dragon"]] * 5, 3),
+        ([(3000, 14000)] + [(7000, 7000)] * 4, [(11000, 11000)] * 5, 4),
+        ([(7000, 7000)] * 5, [(11000, 11000)] * 5, 5),
+        ([(500, 500)] * 5, [(11000, 11000)] * 5, 9),
     ],
 )
-def test_all_five_macro_rules(allies, enemies, expected):
+def test_macro_geometry_rules(allies, enemies, expected):
     assert MacroActionLabeler().label(make_geometry(allies, enemies), 100) == expected
 
 
 def test_stale_or_missing_positions_lower_confidence():
     state = make_geometry([(7000, 7000)] * 5, [(11000, 11000)] * 5)
     state.frame_age = 95
-    assert MacroActionLabeler().classify(state, 100) == (4, 0.1)
+    assert MacroActionLabeler().classify(state, 100) == (11, 0.1)
+
     state.frame_age = 0
     state.players[0]["position"] = None
-    assert MacroActionLabeler().classify(state, 100) == (4, 0.1)
+    assert MacroActionLabeler().classify(state, 100) == (11, 0.1)
+
+
+@pytest.mark.parametrize("kind,expected,time", [("baron", 1, 1500), ("herald", 2, 900)])
+def test_objective_labels_respect_enabled_timers(kind, expected, time):
+    state = make_geometry([PITS[kind]] * 3 + [(7000, 7000)] * 2, [(14000, 14000)] * 5)
+    state.time = time
+    state.objectives = ObjectiveTracker(FeatureConfig()).state(time)
+    assert MacroActionLabeler().label(state, 100) == expected
+    state.objectives[kind]["enabled"] = False
+    assert MacroActionLabeler().label(state, 100) != expected
+
+
+@pytest.mark.parametrize(
+    "allies,enemies,expected",
+    [
+        ([(3000, 13000)] * 5, [(14000, 14000)] * 5, 6),
+        ([(13000, 3000)] * 5, [(14000, 14000)] * 5, 7),
+        ([(4000, 4000)] * 5, [(5000, 5000)] * 5, 8),
+        (
+            [(7000, 7000), (3000, 10000), (10000, 3000), (500, 500), (500, 500)],
+            [(14000, 14000)] * 5,
+            10,
+        ),
+        ([(4000, 4000)] * 2 + [(3000, 10000)] * 2 + [(500, 500)], [(14000, 14000)] * 5, 11),
+    ],
+)
+def test_other_macro_coverage(allies, enemies, expected):
+    state = make_geometry(allies, enemies)
+    assert MacroActionLabeler().label(state, 100) == expected
+    # Rotating both map and teams preserves team-relative defensive/base semantics.
+    if expected in (8, 11):
+        for player in state.players:
+            player["team"] = 300 - player["team"]
+            player["position"] = tuple(15000 - v for v in player["position"])
+        assert MacroActionLabeler().label(state, 200) == expected
+
+
+def test_context_masks_and_relative_features(match_payloads):
+    match, timeline = match_payloads()
+    state = TimelineProcessor(FeatureConfig()).parse(match, timeline)[0]
+    state.players[0]["level"] = 10
+    for profile in ("live", "full"):
+        encoder = FeatureEncoder(FeatureConfig(profile=profile), ItemCatalog())
+        blue = dict(zip(encoder.names, encoder.encode(state, 100)))
+        red = dict(zip(encoder.names, encoder.encode(state, 200)))
+        assert blue["team_level_gap"] == -red["team_level_gap"]
+        assert blue["team_level_gap"] > 0
+        assert blue["ally_geometry_known"] == (profile == "full")
+        if profile == "live":
+            assert all(
+                blue[f"ally_{k}"] == 0
+                for k in ("base_fraction", "forward_fraction", "spread", "geometry_known")
+            )
 
 
 def response(status, data=None, headers=None):
@@ -134,6 +188,21 @@ def test_riot_rate_limit_retry_routing_and_auth():
     assert args[0].startswith("https://europe.api.riotgames.com/")
     assert "a%2Fb" in args[0]
     assert kwargs["headers"] == {"X-Riot-Token": "test-secret"}
+
+
+def test_account_resolution_encodes_unicode_and_uses_token_header():
+    session = Mock()
+    session.get.return_value = response(200, {"puuid": "verified"})
+    api = RiotDataIngestor("test-secret", "kr", session=session)
+    assert api.resolve_account("허거덩#0303")["puuid"] == "verified"
+    args, kwargs = session.get.call_args
+    assert args[0] == (
+        "https://asia.api.riotgames.com/riot/account/v1/accounts/by-riot-id/"
+        "%ED%97%88%EA%B1%B0%EB%8D%A9/0303"
+    )
+    assert kwargs["headers"] == {"X-Riot-Token": "test-secret"}
+    with pytest.raises(ValueError, match="Riot ID"):
+        api.resolve_account("missing-tag")
 
 
 def test_retries_bounded_and_no_early_retry():

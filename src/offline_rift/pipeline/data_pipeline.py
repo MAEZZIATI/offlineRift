@@ -116,6 +116,18 @@ class RiotDataIngestor:
     def fetch_match(self, match_id: str) -> dict:
         return self._get(f"/lol/match/v5/matches/{quote(match_id, safe='')}")
 
+    def resolve_account(self, riot_id: str) -> dict:
+        game_name, separator, tag_line = riot_id.rpartition("#")
+        if not separator or not game_name or not tag_line:
+            raise ValueError("Riot ID must be gameName#tagLine")
+        result = self._get(
+            f"/riot/account/v1/accounts/by-riot-id/{quote(game_name, safe='')}/"
+            f"{quote(tag_line, safe='')}"
+        )
+        if not isinstance(result, dict) or not result.get("puuid"):
+            raise RiotAPIError("Malformed account response")
+        return result
+
     def fetch_timeline(self, match_id: str) -> dict:
         return self._get(f"/lol/match/v5/matches/{quote(match_id, safe='')}/timeline")
 

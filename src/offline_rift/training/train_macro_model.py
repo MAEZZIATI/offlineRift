@@ -19,6 +19,10 @@ def main():
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--validation-fraction", type=float, default=0.2)
+    parser.add_argument("--encoder-type", choices=("team_set", "mlp"), default="team_set")
+    parser.add_argument(
+        "--prediction-mode", choices=("hybrid", "balanced_bc", "cql"), default="hybrid"
+    )
     args = parser.parse_args()
     from offline_rift.training.rl_agent import OfflineMacroTrainer
 
@@ -28,6 +32,8 @@ def main():
         alpha=args.alpha,
         gamma=args.gamma,
         seed=args.seed,
+        encoder_type=args.encoder_type,
+        prediction_mode=args.prediction_mode,
     )
     print(
         json.dumps(

@@ -10,7 +10,7 @@ import numpy as np
 ROLES = ("TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY")
 PITS = {"dragon": (9866, 4414), "baron": (5007, 10471), "herald": (5007, 10471)}
 MAP_SIZE = 15000.0
-SCHEMA_VERSION = "rift-v1"
+SCHEMA_VERSION = "rift-v2"
 
 
 @dataclass
@@ -147,6 +147,20 @@ class FeatureEncoder:
             names += [f"{objective}_eta", f"{objective}_available", f"{objective}_enabled"]
         for buff in self.config.epic_buff_durations:
             names += [f"{buff}_buff_ally", f"{buff}_buff_enemy"]
+        names += ["team_item_gap", "team_items_known", "team_level_gap", "team_levels_known"]
+        for side in ("ally", "enemy"):
+            names += [
+                f"{side}_{k}"
+                for k in (
+                    "base_fraction",
+                    "forward_fraction",
+                    "mid_fraction",
+                    "top_fraction",
+                    "bottom_fraction",
+                    "spread",
+                    "geometry_known",
+                )
+            ]
         return names
 
     @staticmethod
@@ -218,6 +232,46 @@ class FeatureEncoder:
             values += [
                 remaining if obj.get("team") == team else 0,
                 remaining if obj.get("team") == 300 - team else 0,
+            ]
+        powers = [
+            [self.catalog.power(p.get("items", []), self.config.item_spike_gold) for p in side]
+            for side in sides
+        ]
+        items_known = all(
+            power[2] and p.get("inventory_known", True)
+            for side, powers_side in zip(sides, powers)
+            for p, power in zip(side, powers_side)
+        )
+        levels_known = all(p.get("level") is not None for side in sides for p in side)
+        values += [
+            (sum(p[0] for p in powers[0]) - sum(p[0] for p in powers[1])) / 100000
+            if items_known
+            else 0,
+            float(items_known),
+            (sum(p["level"] for p in sides[0]) - sum(p["level"] for p in sides[1])) / 90
+            if levels_known
+            else 0,
+            float(levels_known),
+        ]
+        for side, perspective in zip(sides, (team, 300 - team)):
+            known = full and all(p.get("position") is not None for p in side)
+            if not known:
+                values += [0.0] * 7
+                continue
+            positions = np.asarray([p["position"] for p in side], dtype=float)
+            base = np.array([0, 0]) if perspective == 100 else np.array([MAP_SIZE] * 2)
+            forward = positions.sum(axis=1) > MAP_SIZE
+            if perspective == 200:
+                forward = positions.sum(axis=1) < MAP_SIZE
+            diff = positions[:, 1] - positions[:, 0]
+            values += [
+                float(np.mean(np.linalg.norm(positions - base, axis=1) <= 2200)),
+                float(np.mean(forward)),
+                float(np.mean(np.abs(diff) <= 1800)),
+                float(np.mean(diff > 1800)),
+                float(np.mean(diff < -1800)),
+                float(np.linalg.norm(positions - positions.mean(axis=0), axis=1).mean() / MAP_SIZE),
+                1.0,
             ]
         array = np.asarray(values, dtype=np.float32)
         if array.shape != (len(self.names),) or not np.isfinite(array).all():

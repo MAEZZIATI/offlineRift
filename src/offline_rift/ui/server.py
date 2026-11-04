@@ -89,7 +89,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
 def add_ui_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--team", type=int, choices=(100, 200), default=100)
     parser.add_argument(
-        "--interval", type=float, default=10, help="Poll interval, minimum 2 seconds"
+        "--interval",
+        type=float,
+        default=30,
+        help="Poll interval in seconds (default: 30, minimum: 2)",
     )
     parser.add_argument(
         "--port", type=int, default=8765, help="Local dashboard port (default: 8765)"
@@ -104,7 +107,7 @@ def add_ui_arguments(parser: argparse.ArgumentParser):
 
 
 def run_ui(
-    model_dir: str | Path, *, team=100, interval=10, port=8765, transport="auto", ca_bundle=None
+    model_dir: str | Path, *, team=100, interval=30, port=8765, transport="auto", ca_bundle=None
 ):
     if not 1 <= port <= 65535:
         raise ValueError("UI port must be between 1 and 65535")

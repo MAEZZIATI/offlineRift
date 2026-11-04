@@ -11,6 +11,7 @@ from urllib.request import ProxyHandler, Request, build_opener
 import pytest
 
 from offline_rift.inference.live_client import LiveClientUnavailable
+from offline_rift.pipeline.actions import ACTION_NAMES, ACTION_SCHEMA
 from offline_rift.ui.server import DashboardServer, run_ui
 from offline_rift.ui.service import LiveDashboard
 
@@ -22,22 +23,24 @@ def dashboard(monkeypatch):
         "offline_rift.ui.service.time",
         SimpleNamespace(monotonic=lambda: clock[0], time=lambda: 1000 + clock[0]),
     )
-    client = Mock(interval_seconds=10, team=100)
+    client = Mock(interval_seconds=30, team=100)
     client.policy.metadata = {
+        "action_schema": ACTION_SCHEMA,
+        "action_names": ACTION_NAMES,
         "training_report": {
-            "validation_prediction_counts": [0, 0, 0, 0, 20],
-            "action_counts": [1, 1, 1, 1, 96],
+            "validation_prediction_counts": [0] * 11 + [20],
+            "action_counts": [1, 1, 1, 1, 96] + [0] * 7,
             "validation_heuristic_agreement": 0.85,
             "validation_majority_baseline": 0.85,
-        }
+        },
     }
     client.source.transport = "windows"
     client.recommend.side_effect = lambda snapshot, team: {
-        "action_id": 4,
-        "action": "Defensive Reset & Setup Vision",
+        "action_id": 11,
+        "action": "Unclassified / insufficient evidence",
         "team": team,
         "game_time": 120,
-        "q_values": [0.1, 0.2, 0.3, 0.4, 0.5],
+        "q_values": [0.1] * 12,
     }
     return LiveDashboard(client), clock
 
@@ -53,10 +56,10 @@ def test_tabs_and_teams_share_one_snapshot_and_model_inference(dashboard):
     assert states[0]["recommendations"]["200"]["team"] == 200
     assert states[0]["model"]["collapsed"] is True
     assert states[0]["model"]["action_coverage"] == 5
-    assert states[0]["valid_for_ms"] == 10000
+    assert states[0]["valid_for_ms"] == 30000
     states[0]["recommendations"].clear()
     assert service.state()["recommendations"]  # A caller cannot corrupt the cache.
-    clock[0] = 9
+    clock[0] = 29
     assert service.state()["valid_for_ms"] == 1000
     assert service.client.fetch_live_data.call_count == 1
 
@@ -72,13 +75,13 @@ def test_tabs_and_teams_share_one_snapshot_and_model_inference(dashboard):
 def test_expired_success_is_replaced_by_failure_then_recovers(dashboard, error, status):
     service, clock = dashboard
     assert service.state()["status"] == "live"
-    clock[0] = 11
+    clock[0] = 31
     service.client.fetch_live_data.side_effect = error
     failed = service.state()
     assert failed["status"] == status
     assert failed["recommendations"] == {}
     assert "action_id" not in failed
-    clock[0] = 22
+    clock[0] = 62
     service.client.fetch_live_data.side_effect = None
     assert service.state()["status"] == "live"
     service.close()
