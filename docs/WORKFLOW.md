@@ -1,5 +1,26 @@
 # Real-data workflow
 
+For read-only frozen-model experiments, use `rift research-evaluate --help`. It compares
+raw/filtered CQL, imitation and hybrid predictions with paired match-bootstrap intervals.
+Use `--unseen` with a newly built compatible dataset to exclude every saved training
+and development match. It does not retrain or publish a model. See the
+[research synthesis](RESEARCH_SYNTHESIS.md).
+
+For an explicitly requested broader-account pilot, use `rift research-cohort --help`.
+It saves a separate role-stratified account configuration; `--collect` uses the existing
+authenticated, resumable collector. `--resume PATH --collect` keeps the selected cohort.
+See the [data plan](DATA_PLAN.md) for sampling limitations and environment-key handling.
+
+`rift research-memory --help` trains fixed-split supervised history experiments or,
+with `--evaluate-from`, evaluates their frozen weights on unseen matches. Optional
+`--methods repeat120` and `--control-from` supply a recurrent current-information control.
+These experimental bundles do not change the latest live model. See the
+[memory protocol and results](MEMORY_STUDY.md).
+
+`rift research-audit --help` reproduces the prepared labels, checks causal evidence,
+and writes a blinded local review viewer. Its automated flags do not substitute for
+independent annotator judgments. See [the audit findings](LABEL_AUDIT.md).
+
 ## Start with your downloaded games
 
 ```bash
@@ -8,9 +29,10 @@ rift status
 rift run
 ```
 
-The workspace's `workflow.json` selects the account observed in all 100 raw files,
-uses Asia routing, and filters queue 420. No identity lookup or match re-download is
-needed. `run` resolves patch catalogs, builds and validates transitions, and trains CQL
+The workspace's `workflow.json` was initialized from the original 100-game seed cache,
+uses Asia routing, and filters queue 420. It now retains separately verified additional
+accounts. No identity lookup or match re-download is needed for cached payloads.
+`run` resolves patch catalogs, builds and validates transitions, and trains CQL
 on real data. It skips completed work when inputs and settings are unchanged.
 
 For a fresh checkout with cached files but no configuration:

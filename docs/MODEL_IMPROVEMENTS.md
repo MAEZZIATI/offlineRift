@@ -4,6 +4,14 @@ Status: 2026-11-04. Implemented changes and proposals are separated below. Obser
 runs are recorded in [V2 experiments](RESULTS_V2.md); the historical five-action
 baseline remains in [RESULTS.md](RESULTS.md).
 
+The subsequent [research synthesis](RESEARCH_SYNTHESIS.md) executes the filtering and
+Q-ranking ablations on frozen bundles, adds match-bootstrap intervals, prepares a
+177-window supervision audit and prioritizes the next work. Read it alongside the
+[data-volume and sampling plan](DATA_PLAN.md), [empirical paper draft](papers/01_OBSERVATION_LIMITS.md)
+and [mathematical proposal](papers/02_EVIDENCE_CONDITIONED_OPTIONS.md). The current
+evidence favors balanced imitation as the next experimental reference; no published
+model is replaced by that recommendation.
+
 ## What was wrong
 
 The original live-profile CQL model predicted one fallback label for every validation

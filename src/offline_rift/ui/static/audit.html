@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Offline Rift independent label review</title>
+<style>body{font:16px system-ui;max-width:1100px;margin:25px auto;background:#111b27;color:#edf2f7}button,select,input,textarea{font:inherit;padding:8px;margin:5px}svg{background:#1e3440;border:1px solid #789}textarea{width:95%}aside{max-width:500px}main{display:flex;gap:25px}label{display:block}a{color:#8fe}</style>
+<h1>Independent formation review</h1>
+<p>Causal cached observations only. Positions are coarse and may predate deaths. Objective clocks are estimates. This viewer does not reveal the weak label. Work independently; do not infer intent from formation alone.</p>
+<label>Reviewer ID <input id="reviewer" autocomplete="off"></label>
+<button id="previous">Previous</button><select id="sample"></select><button id="next">Next</button>
+<p id="context"></p><main><div><svg id="map" width="520" height="520" viewBox="0 0 520 520"></svg>
+<label>Observation time <select id="view"></select></label><p id="freshness"></p></div>
+<aside><label>Formation at the marked instant <select id="label"><option value="">Unreviewed</option></select></label>
+<label>Evidence sufficient? <select id="sufficient"><option value="">Unreviewed</option><option>yes</option><option>no</option><option>uncertain</option></select></label>
+<label>Intent observable? <select id="intent"><option value="">Unreviewed</option><option>yes</option><option>no</option><option>uncertain</option></select></label>
+<label>Notes <textarea id="notes" rows="7"></textarea></label><button id="export">Download this review</button>
+<p>Export before closing. Annotations remain in this page's memory; no network or browser storage is used. Give a separate blank copy to the second reviewer. Inspect the instant before discussing subsequent behavior.</p>
+<p id="players"></p><p>Causal events up to the marked instant:</p><pre id="events" style="white-space:pre-wrap"></pre></aside></main>
+<script>
+const packets=__AUDIT_PACKETS__;
+const labels=['Dragon area setup','Baron area setup','Herald area setup','Cross-map pressure','Side-lane split formation','Group mid','Group top side','Group bottom side','Own-half defensive formation','Base regroup','Dispersed lane coverage','Unclassified / insufficient evidence'];
+const el=id=>document.getElementById(id),answers={};
+for(const [i,p] of packets.entries()){const option=document.createElement('option');option.value=i;option.textContent=p.sample_id;el('sample').append(option)}
+for(const [i,name] of labels.entries()){const option=document.createElement('option');option.value=i;option.textContent=`${i}: ${name}`;el('label').append(option)}
+function save(){const p=packets[+el('sample').value];if(!p)return;answers[p.sample_id]={sample_id:p.sample_id,label:el('label').value,evidence_sufficient:el('sufficient').value,intent_observable:el('intent').value,notes:el('notes').value}}
+function map(){const p=packets[+el('sample').value],s=p.causal_views[+el('view').value];el('map').replaceChildren();const ns='http://www.w3.org/2000/svg';for(const player of s.players){if(!player.position)continue;const [x,y]=player.position;const circle=document.createElementNS(ns,'circle');circle.setAttribute('cx',20+x/15000*480);circle.setAttribute('cy',500-y/15000*480);circle.setAttribute('r',8);circle.setAttribute('fill',player.team===100?'#69baff':'#ff817c');const title=document.createElementNS(ns,'title');title.textContent=`${player.id} ${player.champion} team ${player.team} (${x},${y})`;circle.append(title);el('map').append(circle)}el('freshness').textContent=`View t=${s.time}s; position source t=${s.position_source_time}s; age=${s.frame_age_seconds}s. Blue=100, red=200.`;el('players').textContent=s.players.map(x=>`${x.id}: ${x.champion} (${x.team})`).join(' · ')}
+function load(){const p=packets[+el('sample').value];el('context').textContent=`${p.match_id} · patch ${p.patch} · review team ${p.team} · marked instant ${p.timestamp}s`;el('events').textContent=JSON.stringify(p.causal_events,null,2);el('view').replaceChildren();for(const [i,s] of p.causal_views.entries()){const o=document.createElement('option');o.value=i;o.textContent=`${s.time}s`;el('view').append(o)}el('view').value=p.causal_views.length-1;const a=answers[p.sample_id]||{};for(const [id,key] of [['label','label'],['sufficient','evidence_sufficient'],['intent','intent_observable'],['notes','notes']])el(id).value=a[key]||'';map()}
+el('sample').onchange=load;el('view').onchange=map;for(const id of ['label','sufficient','intent','notes'])el(id).oninput=save;
+function move(delta){save();el('sample').value=Math.max(0,Math.min(packets.length-1,+el('sample').value+delta));load()}el('previous').onclick=()=>move(-1);el('next').onclick=()=>move(1);
+el('export').onclick=()=>{save();const result={reviewer_id:el('reviewer').value,kind:'independent reviewer annotations',answers:Object.values(answers)},url=URL.createObjectURL(new Blob([JSON.stringify(result,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download='offline-rift-review.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};load();
+</script></html>

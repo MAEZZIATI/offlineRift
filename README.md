@@ -7,16 +7,18 @@ The main workflow uses **your real cached matches**. There is no synthetic-data 
 
 ## Your existing Faker dataset
 
-`data/raw/` contains 100 ranked solo/duo games from the account `Hide on bush#KR1`,
-spanning patches 16.18, 16.19, and 16.20. The initializer infers the player shared
-across the files and the Korean routing region automatically.
+The original seed cache contained 100 ranked solo/duo games from `Hide on bush#KR1`,
+spanning patches 16.18–16.20. The workspace has since expanded to additional accounts;
+see the [data plan](docs/DATA_PLAN.md) and per-cohort manifests for collection counts.
+Keep the existing configured PUUIDs. For a fresh mixed-account cache, initialize with
+an explicit verified `--puuid` and `--region` when no single account is shared by every file.
 
 ```bash
 cd /home/amine/offlineRift
 source .venv/bin/activate
 rift status
 
-# One-time setup, only when workflow.json does not exist:
+# One-time setup for the original single-account seed cache, if no config exists:
 rift init --name faker
 
 # Process cached matches and train only when inputs/settings have changed:
@@ -97,6 +99,14 @@ The terminal interface remains available: `rift live --team 100 --once`.
 - **[Backend reference](docs/BACKEND.md):** modules, Python interfaces, features, MDP arrays.
 - **[Current real-data results](docs/RESULTS_V2.md):** the 200-match model and controlled prediction comparisons.
 - **[First real-data results](docs/RESULTS.md):** the historical 100-match baseline and its limitations.
+- **[Research synthesis](docs/RESEARCH_SYNTHESIS.md):** frozen-model ablations, uncertainty,
+  prioritized experiments, and two mathematical paper drafts.
+- **[Data plan](docs/DATA_PLAN.md):** sample-size estimates, quality gates, selection bias,
+  and reproducible collection from additional accounts.
+- **[Label audit](docs/LABEL_AUDIT.md):** evidence checks, timing contradictions, and a
+  blinded local review viewer.
+- **[Causal memory study](docs/MEMORY_STUDY.md):** five-seed GRU comparisons with matched
+  snapshot and repeated-current controls; experimental models are not automatically deployed.
 - **[Project structure](docs/STRUCTURE.md):** package layout, compatibility entry points,
   and locations for configuration and generated artifacts.
 
@@ -134,6 +144,11 @@ These are weak team-positioning labels, not records of Faker's intended decision
 Both teams contribute separate episodes, kept together in train/validation splits.
 A single player's history is a small, biased research corpus. Validation agreement
 with heuristic labels does not establish win-rate improvement or optimal play.
+
+The [latest audit](docs/LABEL_AUDIT.md) found objective-timing contradictions that need
+review before promoting another model. The [memory experiment](docs/MEMORY_STUDY.md)
+finds a modest history signal but does not beat the published hybrid on macro F1;
+the plugged model remains unchanged.
 
 Minute-level frames are forward-filled onto the 10-second grid. The default live
 profile masks features unavailable from the Live Client API in training and serving.

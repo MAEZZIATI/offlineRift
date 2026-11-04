@@ -534,6 +534,54 @@ def main():
     init.add_argument("--puuid")
     init.add_argument("--region")
     sub.add_parser("status", help="Show cached data and latest completed artifacts")
+    from offline_rift.training.research import add_research_arguments
+
+    research = sub.add_parser(
+        "research-evaluate", help="Frozen-model ablations, match bootstrap, and label audit sheet"
+    )
+    add_research_arguments(research)
+    from offline_rift.cohort import add_cohort_arguments
+
+    cohort = sub.add_parser(
+        "research-cohort", help="Prepare/resume a role-stratified collection pilot"
+    )
+    add_cohort_arguments(cohort)
+    memory = sub.add_parser(
+        "research-memory", help="Fixed-split causal GRU vs matched-capacity snapshot BC"
+    )
+    memory.add_argument("--dataset", type=Path, required=True)
+    memory.add_argument("--output", type=Path, required=True)
+    memory.add_argument("--seeds", type=int, nargs="+", default=[42, 43, 44, 45, 46])
+    memory.add_argument("--steps", type=int, default=5000)
+    memory.add_argument("--batch-size", type=int, default=64)
+    memory.add_argument("--split-seed", type=int, default=20261105)
+    memory.add_argument("--bootstrap-samples", type=int, default=1000)
+    memory.add_argument(
+        "--evaluate-from",
+        type=Path,
+        help="Completed memory experiment; evaluate frozen models on unseen matches",
+    )
+    memory.add_argument(
+        "--reference-bundle",
+        type=Path,
+        help="Optional plugged bundle for comparison on exactly the same unseen matches",
+    )
+    memory.add_argument(
+        "--methods",
+        nargs="+",
+        choices=("snapshot", "gru60", "gru120", "repeat120"),
+        default=["snapshot", "gru60", "gru120"],
+    )
+    memory.add_argument(
+        "--control-from",
+        type=Path,
+        help="Optional completed repeat120 control with the same seeds and split",
+    )
+    audit = sub.add_parser(
+        "research-audit", help="Reproduce audit labels and generate a blinded local evidence viewer"
+    )
+    for option in ("dataset", "sheet", "key", "reference-report", "raw-dir", "output"):
+        audit.add_argument(f"--{option}", type=Path, required=True)
     collect = sub.add_parser("collect", help="Fetch history, skipping cached match payloads")
     collect.add_argument("--count", type=int)
     collect.add_argument("--start", type=int, default=0)
@@ -564,6 +612,26 @@ def main():
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
     try:
+        if args.command == "research-audit":
+            from offline_rift.audit import run_audit
+
+            run_audit(args)
+            return
+        if args.command == "research-memory":
+            from offline_rift.training.memory import run_memory
+
+            run_memory(args)
+            return
+        if args.command == "research-cohort":
+            from offline_rift.cohort import run_cohort
+
+            run_cohort(args, args.config)
+            return
+        if args.command == "research-evaluate":
+            from offline_rift.training.research import run_research
+
+            run_research(args)
+            return
         if args.command == "init":
             workflow = ResearchWorkflow.initialize(
                 args.config,

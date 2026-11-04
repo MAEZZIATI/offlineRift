@@ -67,11 +67,14 @@ class RiotDataIngestor:
             except (ValueError, TypeError, OverflowError):
                 return 1.0
 
-    def _get(self, path: str, params: dict | None = None):
+    def _get(self, path: str, params: dict | None = None, *, platform: str | None = None):
+        if platform is not None and platform not in REGIONS:
+            raise ValueError("Unknown Riot platform")
+        base_url = self.base_url if platform is None else f"https://{platform}.api.riotgames.com"
         for attempt in range(self.max_retries + 1):
             try:
                 response = self.session.get(
-                    self.base_url + path,
+                    base_url + path,
                     params=params,
                     headers={"X-Riot-Token": self.api_key},
                     timeout=self.timeout,
@@ -115,6 +118,21 @@ class RiotDataIngestor:
 
     def fetch_match(self, match_id: str) -> dict:
         return self._get(f"/lol/match/v5/matches/{quote(match_id, safe='')}")
+
+    def fetch_ranked_accounts(self, platform: str, tier: str) -> list[dict]:
+        """Returned current top-tier roster; current tier is not historical match rank."""
+        if tier not in {"MASTER", "GRANDMASTER", "CHALLENGER"}:
+            raise ValueError("Use MASTER, GRANDMASTER or CHALLENGER")
+        result = self._get(
+            f"/lol/league/v4/{tier.lower()}leagues/by-queue/RANKED_SOLO_5x5", platform=platform
+        )
+        if not isinstance(result, dict) or not isinstance(result.get("entries"), list):
+            raise RiotAPIError("Malformed League-V4 roster")
+        if any(
+            not isinstance(entry, dict) or not entry.get("puuid") for entry in result["entries"]
+        ):
+            raise RiotAPIError("League-V4 roster lacks verified PUUIDs; no identity fallback")
+        return result["entries"]
 
     def resolve_account(self, riot_id: str) -> dict:
         game_name, separator, tag_line = riot_id.rpartition("#")

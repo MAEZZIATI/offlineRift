@@ -56,6 +56,17 @@ def test_cql_train_save_load_and_episode_alignment(tmp_path, match_payloads, pre
     before = trainer.model.predict_value(arrays["observations"][:1], np.array([0]))
     after = policy.model.predict_value(arrays["observations"][:1], np.array([0]))
     np.testing.assert_allclose(before, after)
+    if prediction_mode == "hybrid":
+        from offline_rift.training.research import evaluate_bundle
+
+        # Frozen evaluation must reproduce the trained bundle and retain old output.
+        research = evaluate_bundle(path, tmp_path / "bundle", tmp_path / "research", samples=20)
+        assert (
+            research["metrics"]["hybrid_filtered"]["confusion_matrix"]
+            == report["validation_confusion_matrix"]
+        )
+        with pytest.raises(FileExistsError):
+            evaluate_bundle(path, tmp_path / "bundle", tmp_path / "research", samples=20)
 
 
 def test_team_encoder_is_invariant_to_player_order():

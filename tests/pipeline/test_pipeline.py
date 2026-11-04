@@ -20,6 +20,26 @@ from offline_rift.pipeline.features import (
 )
 
 
+def test_ranked_roster_uses_platform_route_and_requires_verified_puuid():
+    session = Mock()
+    response = Mock(ok=True, status_code=200)
+    response.json.return_value = {"entries": [{"puuid": "verified"}]}
+    session.get.return_value = response
+    api = RiotDataIngestor("test-token", "asia", session=session)
+    assert api.fetch_ranked_accounts("kr", "MASTER") == [{"puuid": "verified"}]
+    call = session.get.call_args
+    assert (
+        call.args[0]
+        == "https://kr.api.riotgames.com/lol/league/v4/masterleagues/by-queue/RANKED_SOLO_5x5"
+    )
+    assert call.kwargs["headers"] == {"X-Riot-Token": "test-token"}
+    response.json.return_value = {"entries": [{"summonerName": "unverified"}]}
+    with pytest.raises(RiotAPIError, match="verified PUUIDs"):
+        api.fetch_ranked_accounts("kr", "MASTER")
+    with pytest.raises(ValueError, match="platform"):
+        api.fetch_ranked_accounts("invented", "MASTER")
+
+
 def test_causal_frames_events_and_terminal_boundary(match_payloads):
     match, timeline = match_payloads()
     config = FeatureConfig(profile="full")
