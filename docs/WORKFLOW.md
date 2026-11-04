@@ -4,8 +4,8 @@
 
 ```bash
 source .venv/bin/activate
-python workflow.py status
-python workflow.py run
+rift status
+rift run
 ```
 
 The workspace's `workflow.json` selects the account observed in all 100 raw files,
@@ -16,7 +16,7 @@ on real data. It skips completed work when inputs and settings are unchanged.
 For a fresh checkout with cached files but no configuration:
 
 ```bash
-python workflow.py init --name faker
+rift init --name faker
 ```
 
 Initialization infers a unique player common to every raw match. If that is ambiguous,
@@ -28,19 +28,20 @@ Edit it thereafter. `workflow.json` is ignored by Git; API keys stay in the envi
 
 | Command | Effect |
 |---|---|
-| `python workflow.py status` | Show cached matches, patch coverage, dataset and model paths |
-| `python workflow.py run` | Build from cache and train when changed |
-| `python workflow.py run --refresh` | Collect recent history first, then build/train |
-| `python workflow.py collect --count 300` | Scan latest 300 games, downloading only missing payloads |
-| `python workflow.py collect --start 100 --count 200` | Backfill 200 games after the newest 100 |
-| `python workflow.py build` | Build and validate a dataset without training |
-| `python workflow.py train` | Build if needed, then train if needed |
-| `python workflow.py run --retrain` | Force a new model run on unchanged data |
-| `python workflow.py run --refresh-catalogs` | Refresh required catalogs; rebuild if changed |
-| `python workflow.py live --team 200` | Poll with the latest model for red team |
-| `python workflow.py live --once` | One poll; returns offline status if no local game |
+| `rift status` | Show cached matches, patch coverage, dataset and model paths |
+| `rift run` | Build from cache and train when changed |
+| `rift run --refresh` | Collect recent history first, then build/train |
+| `rift collect --count 300` | Scan latest 300 games, downloading only missing payloads |
+| `rift collect --start 100 --count 200` | Backfill 200 games after the newest 100 |
+| `rift build` | Build and validate a dataset without training |
+| `rift train` | Build if needed, then train if needed |
+| `rift run --retrain` | Force a new model run on unchanged data |
+| `rift run --refresh-catalogs` | Refresh required catalogs; rebuild if changed |
+| `rift live --team 200` | Poll with the latest model for red team |
+| `rift live --once` | One poll; returns offline status if no local game |
+| `rift ui` | Serve the local browser dashboard at http://localhost:8765 |
 
-For another configuration: `python workflow.py --config another-workflow.json run`.
+For another configuration: `rift --config another-workflow.json run`.
 Place the option before the subcommand. Relative artifact paths resolve against the
 configuration file's directory. Run one writer per project at a time.
 
@@ -48,7 +49,7 @@ configuration file's directory. Run one writer per project at a time.
 
 ```bash
 export RIOT_API_KEY='your-current-development-key'
-python workflow.py run --refresh
+rift run --refresh
 ```
 
 `collection.count` is a recent-history window, not a required number of *new* games.
@@ -190,8 +191,13 @@ the dataset does not claim to capture that player's personal intended decisions.
 ## Live usage
 
 ```bash
-python workflow.py live --team 100 --interval 10
+rift ui
+# Or terminal JSON:
+rift live --team 100 --interval 10
 ```
+
+The dashboard uses the latest completed model and lets you switch sides without
+reloading it. See [the UI guide](LIVE_UI.md) for resource use and Windows/WSL transport.
 
 The latest completed model is selected automatically. `--once` checks a single poll.
 `--ca-bundle /path/to/riot-root.pem` enables certificate verification. The official endpoint

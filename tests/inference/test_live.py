@@ -100,3 +100,14 @@ def test_malformed_live_json():
     session.get.return_value.json.side_effect = ValueError()
     with pytest.raises(LiveClientUnavailable):
         LiveClientInference(policy=fake_policy(), session=session).fetch_live_data()
+
+
+def test_failed_policy_load_closes_transport(monkeypatch):
+    session = Mock()
+    monkeypatch.setattr(
+        "offline_rift.inference.live_client.MacroPolicy",
+        Mock(side_effect=RuntimeError("invalid policy")),
+    )
+    with pytest.raises(RuntimeError, match="invalid policy"):
+        LiveClientInference("broken-bundle", session=session)
+    session.close.assert_called_once()

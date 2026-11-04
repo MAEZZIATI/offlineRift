@@ -5,13 +5,19 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import time
 from collections.abc import Callable
 from pathlib import Path
-from urllib.parse import urlparse
 
 import requests
 
+from offline_rift.inference.transport import (
+    DEFAULT_ENDPOINT,
+    TRANSPORTS,
+    LiveClientUnavailable,
+    LiveDataSource,
+)
 from offline_rift.pipeline.features import FeatureConfig, ObjectiveTracker, Snapshot
 from offline_rift.training.rl_agent import MacroPolicy
 
@@ -26,10 +32,6 @@ ROLE_MAP = {
 }
 
 
-class LiveClientUnavailable(RuntimeError):
-    pass
-
-
 class LiveStateAdapter:
     def __init__(self, config: FeatureConfig):
         self.config = config
@@ -39,7 +41,7 @@ class LiveStateAdapter:
         if game.get("mapNumber") != 11:
             raise ValueError("Live inference requires Summoner's Rift (map 11)")
         timestamp = float(game["gameTime"])
-        if timestamp < 0:
+        if not math.isfinite(timestamp) or timestamp < 0:
             raise ValueError("Invalid game clock")
         raw_players = data.get("allPlayers", [])
         if len(raw_players) != 10:
@@ -102,59 +104,50 @@ class LiveClientInference:
         model_dir: str | Path | None = None,
         *,
         team: int = 100,
-        endpoint: str = "https://127.0.0.1:2999/liveclientdata/allgamedata",
+        endpoint: str = DEFAULT_ENDPOINT,
         interval_seconds: float = 10,
         timeout: float = 3,
         verify_tls: bool | str = False,
         session: requests.Session | None = None,
         policy: MacroPolicy | None = None,
+        transport: str = "auto",
     ):
-        if team not in (100, 200) or interval_seconds <= 0 or timeout <= 0:
+        if team not in (100, 200) or not math.isfinite(interval_seconds) or interval_seconds <= 0:
             raise ValueError("Invalid team, polling interval, or timeout")
-        parsed = urlparse(endpoint)
-        if (
-            parsed.scheme not in {"http", "https"}
-            or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}
-            or parsed.username
-            or parsed.password
-        ):
-            raise ValueError("Live endpoint must be local HTTP(S)")
-        if policy is None and model_dir is None:
-            raise ValueError("Provide a model directory or policy")
-        self.policy = policy if policy is not None else MacroPolicy(model_dir)
-        if self.policy.config.profile != "live":
-            raise ValueError("This live API requires a policy trained with profile='live'")
+        self.source = LiveDataSource(
+            endpoint, timeout=timeout, verify_tls=verify_tls, transport=transport, session=session
+        )
+        try:
+            if policy is None and model_dir is None:
+                raise ValueError("Provide a model directory or policy")
+            self.policy = policy if policy is not None else MacroPolicy(model_dir)
+            if self.policy.config.profile != "live":
+                raise ValueError("This live API requires a policy trained with profile='live'")
+        except Exception:
+            self.source.close()
+            raise
         self.adapter = LiveStateAdapter(self.policy.config)
         self.team, self.endpoint = team, endpoint
         self.interval_seconds, self.timeout, self.verify_tls = interval_seconds, timeout, verify_tls
-        self.session = session or requests.Session()
-        self.session.trust_env = False  # Local requests must not be sent through a proxy.
+        self.session = self.source.session
 
     def fetch_live_data(self) -> dict:
-        try:
-            response = self.session.get(
-                self.endpoint, timeout=self.timeout, verify=self.verify_tls, allow_redirects=False
-            )
-            response.raise_for_status()
-            if 300 <= response.status_code < 400:
-                raise LiveClientUnavailable("Live endpoint returned a redirect")
-            data = response.json()
-            if not isinstance(data, dict):
-                raise TypeError("Expected JSON object")
-            return data
-        except (requests.RequestException, ValueError, TypeError):
-            raise LiveClientUnavailable(
-                "Live Client unavailable; start an active local match"
-            ) from None
+        return self.source.fetch()
 
     def infer_once(self) -> dict:
         snapshot = self.adapter.snapshot(self.fetch_live_data())
-        observation = self.policy.encoder.encode(snapshot, self.team)
+        return self.recommend(snapshot, self.team)
+
+    def recommend(self, snapshot: Snapshot, team: int) -> dict:
+        """Score one perspective; callers may share a snapshot across both teams."""
+        if team not in (100, 200):
+            raise ValueError("Invalid team")
+        observation = self.policy.encoder.encode(snapshot, team)
         result = self.policy.recommend(observation)
         result.update(
             {
                 "game_time": snapshot.time,
-                "team": self.team,
+                "team": team,
                 "status": "partial_observation",
                 "unavailable_features": [
                     "team_total_gold",
@@ -186,7 +179,10 @@ class LiveClientInference:
         except KeyboardInterrupt:
             LOG.info("Polling stopped")
         finally:
-            self.session.close()
+            self.close()
+
+    def close(self):
+        self.source.close()
 
 
 def main():
@@ -194,7 +190,8 @@ def main():
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--team", type=int, choices=(100, 200), default=100)
     parser.add_argument("--interval", type=float, default=10)
-    parser.add_argument("--endpoint", default="https://127.0.0.1:2999/liveclientdata/allgamedata")
+    parser.add_argument("--endpoint", default=DEFAULT_ENDPOINT)
+    parser.add_argument("--transport", choices=TRANSPORTS, default="auto")
     parser.add_argument("--ca-bundle", help="Optional Riot root certificate for TLS verification")
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
@@ -205,6 +202,7 @@ def main():
         endpoint=args.endpoint,
         interval_seconds=args.interval,
         verify_tls=args.ca_bundle or False,
+        transport=args.transport,
     )
     client.run(max_polls=1 if args.once else None)
 

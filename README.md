@@ -14,26 +14,32 @@ across the files and the Korean routing region automatically.
 ```bash
 cd /home/amine/offlineRift
 source .venv/bin/activate
+rift status
 
 # One-time setup, only when workflow.json does not exist:
-python workflow.py init --name faker
+rift init --name faker
 
 # Process cached matches and train only when inputs/settings have changed:
-python workflow.py run
+rift run
 
 # Show data coverage and current artifact paths:
-python workflow.py status
+rift status
 ```
 
 `workflow.json` is already initialized in this workspace. Your normal command is now
-**`python workflow.py run`**. No Riot key is needed to process cached games. Data Dragon
+**`rift run`**. No Riot key is needed to process cached games. Data Dragon
 downloads require internet only when patch catalogs are missing.
+
+Use these commands in your WSL terminal from the repository root. If `rift` is not
+found, run `.venv/bin/python -m offline_rift status` without activation, or refresh
+the installation with `uv pip install --python .venv/bin/python -e '.[train,dev]'`.
+The older `python workflow.py ...` command is also supported.
 
 ## Add games later
 
 ```bash
 export RIOT_API_KEY='your-current-key'
-python workflow.py run --refresh
+rift run --refresh
 ```
 
 This checks the latest 100 games, reuses cached matches, downloads new ones, builds
@@ -41,8 +47,8 @@ from **all** cached games for the configured player/queue, and trains when neede
 Increase `collection.count` in `workflow.json` to scan more history. For older games:
 
 ```bash
-python workflow.py collect --start 100 --count 200
-python workflow.py run
+rift collect --start 100 --count 200
+rift run
 ```
 
 Requests paginate automatically. Batches get unique IDs and progress manifests.
@@ -52,7 +58,7 @@ reuse their outputs.
 
 ## Change settings
 
-Edit `workflow.json`, then run `python workflow.py run` again.
+Edit `workflow.json`, then run `rift run` again.
 
 - Training changes reuse the dataset and create a new model run.
 - Data, preprocessing, feature, or catalog changes rebuild the dataset automatically.
@@ -66,11 +72,23 @@ rules remain explicit configuration; catalog downloads do not validate them.
 ## Use the latest policy
 
 ```bash
-python workflow.py live --team 100
+rift ui
 ```
 
-Team 100 is blue/ORDER; 200 is red/CHAOS. No model path is needed. `--once` performs
-a single poll. Outside an active local game, polling returns an offline status.
+Open **http://localhost:8765** in your browser. Choose blue or red side to see the
+latest model suggestion, five action values, game clock, and model limitations.
+The dashboard waits for an active 5v5 Summoner's Rift match; no model path or Riot
+API key is needed. Stop the command with Ctrl-C.
+
+The UI is plain HTML/CSS/JavaScript in `src/offline_rift/ui/static/`, served by a
+small Python standard-library server. It loads one CPU model, shares one cached
+game fetch across tabs, refreshes every 10 seconds, and pauses hidden tabs. No Node,
+frontend build, cloud service, or new runtime dependency is required.
+
+On WSL, `auto` transport uses Windows `curl.exe` when available to read the Windows
+game's loopback API. On native Windows/Linux it uses local HTTP. See the
+[live UI guide](docs/LIVE_UI.md) for setup, transport overrides, and limitations.
+The terminal interface remains available: `rift live --team 100 --once`.
 
 ## Documentation
 
@@ -90,6 +108,8 @@ a single poll. Outside an active local game, polling returns an offline status.
 | `src/offline_rift/training/rl_agent.py` | Discrete CQL trainer and policy loader |
 | `src/offline_rift/training/train_macro_model.py` | Direct CLI for training an explicit NPZ dataset |
 | `src/offline_rift/inference/live_client.py` | Local polling, features, and recommendations |
+| `src/offline_rift/inference/transport.py` | Bounded local/Windows game API access |
+| `src/offline_rift/ui/` | Browser assets, shared snapshot cache, and local HTTP serving |
 | `scripts/` | Small compatibility launchers for the package commands |
 
 ## Install and test

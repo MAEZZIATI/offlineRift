@@ -95,8 +95,8 @@ five-action space, and match-level holdout. References:
 Direct commands remain available:
 
 ```bash
-python train_macro_model.py --dataset custom.npz --output models/my-run --steps 10000
-python live_client.py --model models/my-run --team 100 --once
+rift-train --dataset custom.npz --output models/my-run --steps 10000
+rift-live --model models/my-run --team 100 --once
 ```
 
 Direct CLIs retain explicit paths and original overwrite behavior. Prefer the workflow

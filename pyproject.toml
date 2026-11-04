@@ -18,9 +18,10 @@ rift-collect = "offline_rift.pipeline.data_pipeline:main"
 rift-train = "offline_rift.training.train_macro_model:main"
 rift-live = "offline_rift.inference.live_client:main"
 rift = "offline_rift.workflow:main"
+rift-ui = "offline_rift.ui.server:main"
 
 [tool.setuptools]
-py-modules = ["workflow", "data_pipeline", "action_labeler", "features", "rl_agent", "train_macro_model", "live_client"]
+py-modules = ["workflow"]
 
 [tool.setuptools.package-dir]
 "" = "."
@@ -29,6 +30,9 @@ offline_rift = "src/offline_rift"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["offline_rift*"]
+
+[tool.setuptools.package-data]
+"offline_rift.ui" = ["static/*.html", "static/*.css", "static/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

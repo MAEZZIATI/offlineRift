@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="Your local Offline Rift live macro research dashboard.">
+  <title>Offline Rift · Live companion</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Offline Rift home"><span class="brand-mark" aria-hidden="true">◈</span> OFFLINE<span class="brand-light">RIFT</span></a>
+      <span class="edition">LIVE COMPANION <span class="version">/ 01</span></span>
+      <span class="connection" id="connection" role="status"><span class="dot"></span><span id="connection-text">Connecting</span></span>
+    </header>
+
+    <main>
+      <section class="intro" aria-labelledby="page-title">
+        <div><p class="eyebrow">A LITTLE CLARITY IN THE CHAOS</p><h1 id="page-title">Your next macro move.</h1><p class="muted">A live perspective on the bigger picture.</p></div>
+        <div class="controls">
+          <fieldset class="team-picker"><legend>Your side</legend>
+            <label><input type="radio" name="team" value="100" checked><span><i class="team-dot blue"></i>Blue side</span></label>
+            <label><input type="radio" name="team" value="200"><span><i class="team-dot red"></i>Red side</span></label>
+          </fieldset>
+          <button id="pause" class="quiet-button" type="button" aria-pressed="false">Pause updates</button>
+        </div>
+      </section>
+
+      <aside id="model-warning" class="notice" hidden><span aria-hidden="true">!</span><p id="model-warning-text"></p></aside>
+
+      <div class="dashboard">
+        <section class="decision panel" aria-labelledby="decision-title" aria-live="polite" aria-atomic="true">
+          <div class="panel-top"><span class="eyebrow">RECOMMENDED MACRO</span><span class="tag" id="decision-tag">STANDBY</span></div>
+          <div class="decision-body">
+            <div class="decision-symbol" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="12" cy="12" r="7"/><path d="M12 1v5m0 12v5M1 12h5m12 0h5M15 9l-3 6-3-3 6-3Z"/></svg></div>
+            <p class="decision-kicker" id="decision-kicker">THE MAP COMES FIRST</p>
+            <h2 id="decision-title">Waiting for the Rift.</h2>
+            <p id="decision-description">Start a 5v5 Summoner’s Rift match. Your model’s suggestion will appear once the map is loaded.</p>
+          </div>
+          <div class="decision-footer"><span><span class="tiny-dot"></span><span id="perspective">Blue team perspective</span></span><span id="decision-time">No active observation</span></div>
+        </section>
+
+        <aside class="session panel" aria-labelledby="session-title">
+          <div class="panel-top"><h2 class="eyebrow" id="session-title">THE SESSION</h2><span class="muted small">LOCAL</span></div>
+          <div class="game-clock" id="game-clock">--:--</div><p class="clock-label">GAME TIME AT LAST POLL</p>
+          <dl class="session-facts">
+            <div><dt>Observation</dt><dd id="observation">Waiting</dd></div>
+            <div><dt>Game connection</dt><dd id="transport">Detecting</dd></div>
+            <div><dt>Refresh interval</dt><dd id="interval">10 seconds</dd></div>
+            <div><dt>Last check</dt><dd id="last-check">—</dd></div>
+          </dl>
+          <p class="session-note">Updates pause when this tab is hidden. No game history is stored by this dashboard.</p>
+        </aside>
+
+        <section class="values panel" aria-labelledby="values-title">
+          <div class="panel-top"><h2 id="values-title">The five options</h2><span class="muted small">Q-VALUE</span></div>
+          <ol class="action-list" id="action-list"></ol>
+          <p class="values-note">Q-values estimate discounted return. They are <strong>not win probabilities</strong> or confidence scores.</p>
+        </section>
+
+        <section class="context panel" aria-labelledby="context-title">
+          <div class="panel-top"><h2 id="context-title">Read the bigger picture.</h2><span class="context-mark" aria-hidden="true">↗</span></div>
+          <p>This policy sees levels, inventory, game time, and estimated objective state. It cannot see the full map.</p>
+          <p class="eyebrow context-label">UNAVAILABLE TO THIS MODEL</p>
+          <div class="feature-tags"><span>Player coordinates</span><span>Team total gold</span><span>Ability cooldowns</span></div>
+          <details id="model-details"><summary>Model validation &amp; limitations</summary>
+            <dl class="model-facts">
+              <div><dt>Training action coverage</dt><dd id="coverage">—</dd></div>
+              <div><dt>Heuristic agreement</dt><dd id="agreement">—</dd></div>
+              <div><dt>Majority baseline</dt><dd id="baseline">—</dd></div>
+            </dl>
+            <p id="distribution"></p>
+            <p id="predictions"></p>
+            <p>These measure agreement with weak labels, not strategic quality. Objective timings are configured estimates. Useful strategy and win-rate improvement have not been established.</p>
+          </details>
+        </section>
+      </div>
+    </main>
+    <footer class="page-footer"><span><span class="brand-mark small" aria-hidden="true">◈</span> LOCAL MODEL. LIVE PERSPECTIVE.</span><span>Research prototype · Keep your own judgment.</span></footer>
+  </div>
+  <noscript><p class="notice">Enable JavaScript to receive live recommendations.</p></noscript>
+</body>
+</html>

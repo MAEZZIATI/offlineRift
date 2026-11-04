@@ -3,7 +3,7 @@
 ## Purpose and scope
 
 Offline Rift is a Python research backend for learning team-level League of Legends
-macro actions from real Match-V5 data with offline discrete CQL. Preserve the real-data
+macro actions from real Match-V5 data. Preserve the real-data
 workflow and describe model limitations accurately. A running training pipeline does
 not establish useful strategy, optimality, or calibrated win probabilities.
 

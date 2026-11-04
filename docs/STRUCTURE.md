@@ -15,6 +15,11 @@ offlineRift/
       train_macro_model.py      # Direct training CLI
     inference/
       live_client.py            # Local live-game adaptation and polling
+      transport.py              # Local HTTP and WSL-to-Windows loopback access
+    ui/
+      service.py                # Shared on-demand snapshot cache and model summary
+      server.py                 # Standard-library HTTP server and UI CLI
+      static/                   # Buildless HTML, CSS, and JavaScript
   tests/
     conftest.py                 # Shared deterministic match fixtures
     test_workflow.py            # Workflow/cache/persistence integration tests
@@ -27,6 +32,7 @@ offlineRift/
   AGENTS.md                     # Repository conventions and validation instructions
   README.md                     # Setup and everyday commands
   pyproject.toml                # Dependencies, packaging, and command entry points
+  workflow.py                   # Compatibility launcher for older workflow commands
   scripts/                      # Thin compatibility command launchers
   workflow.json                 # Local settings, ignored by Git
   data/                         # Local raw games, catalogs, datasets, manifests
@@ -43,6 +49,7 @@ Existing commands remain supported:
 
 ```bash
 rift status
+rift ui
 rift run --refresh
 python scripts/workflow.py status
 python scripts/train_macro_model.py --help
@@ -72,8 +79,8 @@ entry points resolve correctly:
 uv pip install -e '.[train,dev]'
 ```
 
-The configuration schema, collection behavior, features, labels, rewards, training
-algorithm, and inference behavior are unchanged by this reorganization. Existing
+The configuration schema, collection behavior, features, labels, rewards, and training
+algorithm are unchanged by this reorganization. Existing
 `workflow.json`, raw matches, datasets, models, and latest-artifact references keep their
 original locations. Nothing is retrained or recollected as part of the move.
 

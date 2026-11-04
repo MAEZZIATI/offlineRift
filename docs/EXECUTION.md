@@ -15,6 +15,25 @@ uv pip install -e '.[train,dev]'
 rift status
 ```
 
+Run these commands inside the WSL terminal, from the repository root. To avoid relying
+on shell activation or a `rift` command from another Python installation, use:
+
+```bash
+.venv/bin/python -m offline_rift status
+.venv/bin/python -m offline_rift run
+```
+
+`python workflow.py ...` remains available as a compatibility launcher. The workflow
+implementation lives in `src/offline_rift/`; do not execute that source file directly.
+If importing `offline_rift` fails, refresh this environment explicitly:
+
+```bash
+uv pip install --python .venv/bin/python -e '.[train,dev]'
+```
+
+An environment created by `uv venv` may have no `pip` module; use `uv pip` as above.
+Do not recreate an existing working `.venv` just to refresh the package.
+
 For a fresh environment, create the virtual environment first:
 
 ```bash
@@ -84,11 +103,21 @@ only if the required patch catalogs have not already been cached.
 
 ## 4. Run live recommendations
 
-The current serving interface prints JSON recommendations to a terminal. It is not an
-HTTP backend server or an in-game overlay.
+Start the lightweight local browser dashboard:
+
+```bash
+rift ui
+```
+
+Open **http://localhost:8765** in your browser, including your Windows browser when the
+command runs in WSL. Choose your side in the interface. The latest completed policy is
+loaded once, and the shared snapshot updates at most once every ten seconds while the
+dashboard is viewed. No frontend installation or build is needed. See [the UI guide](LIVE_UI.md).
+
+The terminal JSON interface also remains available:
 
 Start a 5v5 Summoner's Rift match and wait until the map is loaded. Then, from a Python
-environment on the same operating system as the game:
+environment on the game's operating system, or in WSL with Windows interop enabled:
 
 ```bash
 rift live --team 100 --once
@@ -115,8 +144,20 @@ curl.exe --insecure --noproxy "*" https://127.0.0.1:2999/liveclientdata/gamestat
 ```
 
 If that fails, wait for an active match to load before retrying. If Windows can access it
-but WSL cannot, use native Windows Python for live polling; do not point the client at a
-public address or expose port 2999.
+but WSL local HTTP cannot, the default `auto` transport uses Windows `curl.exe` when
+it is on PATH. You can select this explicitly:
+
+```bash
+rift ui --transport windows
+# Terminal equivalent:
+rift live --transport windows --once
+```
+
+This uses [WSL's Windows executable interop](https://learn.microsoft.com/en-us/windows/wsl/interop)
+to query Windows loopback. It does not open the game port to the network. Use
+`--transport local` to force ordinary local HTTP, for example with mirrored networking.
+If Windows interop is disabled or `curl.exe` is unavailable, use native Windows Python
+as described below; do not point the client at a public address or expose port 2999.
 
 One option is to open the existing checkout through its WSL share from PowerShell:
 
@@ -135,8 +176,7 @@ checkout instead of overwriting its `.venv`, for example:
 py -3.11 -m venv "$env:LOCALAPPDATA\OfflineRift\venv"
 $riftPython = "$env:LOCALAPPDATA\OfflineRift\venv\Scripts\python.exe"
 & $riftPython -m pip install -e '.[train]'
-& $riftPython scripts\live_client.py --model 'models\faker\YOUR_COMPLETED_RUN_ID' --team 100 --once
-& $riftPython scripts\live_client.py --model 'models\faker\YOUR_COMPLETED_RUN_ID' --team 100 --interval 10
+& $riftPython -m offline_rift.ui.server --model 'models\faker\YOUR_COMPLETED_RUN_ID'
 ```
 
 Use the completed run directory displayed by `rift status`. The direct model path avoids
@@ -145,7 +185,8 @@ Use an installed supported Python version if 3.11 is unavailable; the project re
 
 ## 5. Interpret a live result
 
-Successful output contains an action ID/name, a selected Q-value, five action values, game
+The UI shows the selected macro and all five Q-values. Successful terminal output
+contains an action ID/name, a selected Q-value, five action values, game
 time, team, and `partial_observation` status. The live API lacks coordinates, team total
 gold, and reliable ability cast history; those features are masked consistently with the
 training profile. Q-values are discounted-return estimates, not win probabilities.

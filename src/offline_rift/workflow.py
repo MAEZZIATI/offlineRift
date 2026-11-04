@@ -474,6 +474,9 @@ class ResearchWorkflow:
 
 
 def main():
+    from offline_rift.inference.transport import TRANSPORTS
+    from offline_rift.ui.server import add_ui_arguments
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path("workflow.json"))
     sub = parser.add_subparsers(dest="command", required=True)
@@ -499,6 +502,9 @@ def main():
     live.add_argument("--interval", type=float, default=10)
     live.add_argument("--once", action="store_true")
     live.add_argument("--ca-bundle")
+    live.add_argument("--transport", choices=TRANSPORTS, default="auto")
+    ui = sub.add_parser("ui", help="Open a lightweight local browser dashboard for live decisions")
+    add_ui_arguments(ui)
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
     try:
@@ -530,17 +536,30 @@ def main():
                 f"Batch {batch['batch_id']}: {len(batch['downloaded'])} new, "
                 f"{len(batch['reused'])} cached"
             )
-        elif args.command == "live":
+        elif args.command in {"live", "ui"}:
             from offline_rift.inference.live_client import LiveClientInference
 
             model = workflow.state().get("model")
             if not model:
-                raise ValueError("No completed model; run workflow.py run first")
+                raise ValueError("No completed model; run 'rift run' first")
+            if args.command == "ui":
+                from offline_rift.ui.server import run_ui
+
+                run_ui(
+                    model["path"],
+                    team=args.team,
+                    interval=args.interval,
+                    port=args.port,
+                    transport=args.transport,
+                    ca_bundle=args.ca_bundle,
+                )
+                return
             LiveClientInference(
                 model["path"],
                 team=args.team,
                 interval_seconds=args.interval,
                 verify_tls=args.ca_bundle or False,
+                transport=args.transport,
             ).run(max_polls=1 if args.once else None)
         else:
             if getattr(args, "refresh", False):
