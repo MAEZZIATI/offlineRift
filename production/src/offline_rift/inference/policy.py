@@ -42,11 +42,20 @@ class NextActionPolicy:
         self.device = device
         self.algorithm = self.metadata["algorithm"]
         architecture = self.metadata.get("network_architecture", "shared_v1")
-        expected = "independent_actor_v1" if self.algorithm == "iql" else "shared_v1"
+        bounded = self.metadata["train_config"].get("bounded_values", False)
+        expected = (
+            "independent_actor_v1"
+            if self.algorithm == "iql"
+            else "bounded_shared_v1"
+            if bounded
+            else "shared_v1"
+        )
+        if bounded and self.algorithm != "cql":
+            raise ValueError("Bounded architecture requires CQL")
         if self.algorithm not in {"cql", "bc", "iql"} or architecture != expected:
             raise ValueError("Invalid model architecture contract")
         self.network = OptionNetwork(
-            len(self.encoder.names), separate_actor=self.algorithm == "iql"
+            len(self.encoder.names), separate_actor=self.algorithm == "iql", bounded_values=bounded
         ).to(device)
         self.network.load_state_dict(
             torch.load(directory / "policy.pt", map_location=device, weights_only=True)

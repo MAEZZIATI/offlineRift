@@ -7,12 +7,16 @@ from pathlib import Path
 import numpy as np
 import torch
 from rift_common import network as network_contract
+from rift_common import observation_masks
 from rift_common.actions import ACTION_NAMES, GROUPS
 from rift_common.artifacts import atomic_json, file_digest, write_bundle_manifest
 from rift_common.dataset import load_dataset
 from rift_common.metrics import behavior_metrics
 from rift_common.network import OptionNetwork, bellman_target, rank_options
 from torch.nn import functional as F
+
+from offline_rift.training import augmentation
+from offline_rift.training.augmentation import ObservationAugmenter
 
 
 @dataclass(frozen=True)
@@ -34,6 +38,8 @@ class TrainConfig:
     advantage_temperature: float = 3.0
     advantage_clip: float = 100.0
     target_tau: float = 0.005
+    joint_history_dropout: float = 0.0
+    bounded_values: bool = False
 
     def __post_init__(self):
         if (
@@ -51,6 +57,9 @@ class TrainConfig:
             or self.advantage_temperature <= 0
             or self.advantage_clip < 1
             or not 0 < self.target_tau <= 1
+            or not 0 <= self.joint_history_dropout <= 1
+            or not isinstance(self.bounded_values, bool)
+            or (self.bounded_values and self.algorithm != "cql")
         ):
             raise ValueError("Invalid training configuration")
 
@@ -115,6 +124,8 @@ class PolicyTrainer:
             "source_sha256": {
                 "trainer": file_digest(__file__),
                 "network": file_digest(network_contract.__file__),
+                "augmentation": file_digest(augmentation.__file__),
+                "observation_masks": file_digest(observation_masks.__file__),
             },
         }
         if config.algorithm == "iql":
@@ -124,7 +135,9 @@ class PolicyTrainer:
             torch.set_num_threads(config.cpu_threads)
             torch.manual_seed(config.seed)
             network = OptionNetwork(
-                arrays["observations"].shape[1], separate_actor=config.algorithm == "iql"
+                arrays["observations"].shape[1],
+                separate_actor=config.algorithm == "iql",
+                bounded_values=config.bounded_values,
             ).to(config.device)
             implicit = None
             if config.algorithm == "iql":
@@ -155,31 +168,20 @@ class PolicyTrainer:
             weights[class_counts > 0] = np.sqrt(class_counts.sum() / class_counts[class_counts > 0])
             weights[class_counts > 0] /= weights[class_counts > 0].mean()
             class_weights = torch.as_tensor(weights, device=config.device)
-            optional = [
-                metadata["feature_names"].index(name)
-                for name in (
-                    "self_health",
-                    "self_cs_rate",
-                    "self_level_rate",
-                    "own_towers_lost",
-                    "enemy_towers_lost",
-                )
-            ]
-
-            def mask_optional(observations):
-                # Public history can start late; own-health fields may be unavailable.
-                observed = observations.clone()
-                for index in optional:
-                    missing = torch.rand(len(observed), device=config.device) < 0.2
-                    observed[missing, index : index + 2] = 0
-                return observed
+            augmenter = ObservationAugmenter(
+                metadata["feature_names"], joint_dropout=config.joint_history_dropout
+            )
 
             last = {}
             for step in range(1, config.steps + 1):
                 chosen = rng.choice(rows, size=config.batch_size)
                 batch = {key: value[chosen].to(config.device) for key, value in tensors.items()}
-                batch["observations"] = mask_optional(batch["observations"])
-                batch["next_observations"] = mask_optional(batch["next_observations"])
+                batch["observations"], batch["action_masks"] = augmenter(
+                    batch["observations"], batch["action_masks"], actions=batch["actions"]
+                )
+                batch["next_observations"], batch["next_action_masks"] = augmenter(
+                    batch["next_observations"], batch["next_action_masks"]
+                )
                 if implicit is not None:
                     last = {"step": step, **implicit.step(batch)}
                     if step % 1000 == 0 or step == config.steps:
@@ -273,6 +275,7 @@ class PolicyTrainer:
                     if np.any(arrays["groups"][selected] == i)
                 },
                 "last_optimizer": last,
+                "augmentation": dict(augmenter.counts),
                 "observed_action_q_mean": float(values[np.arange(len(truth)), truth].mean())
                 if config.algorithm in {"cql", "iql"}
                 else None,
@@ -290,6 +293,8 @@ class PolicyTrainer:
                 algorithm=config.algorithm,
                 network_architecture="independent_actor_v1"
                 if config.algorithm == "iql"
+                else "bounded_shared_v1"
+                if config.bounded_values
                 else "shared_v1",
                 train_config=asdict(config),
                 training_report=report,

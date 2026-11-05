@@ -82,6 +82,9 @@ valid outputs; the app does not force a new macro every poll.
 .venv/bin/rift-ui --model /path/to/next-action-policy --transport auto
 # One local poll:
 .venv/bin/rift live --once --actor active --role JUNGLE
+# Explicit opt-in: aggregate input availability only, in a new directory:
+.venv/bin/rift live --actor active --role JUNGLE \
+  --capture-availability data/research/my-availability-session
 ```
 
 The game API is available during an active 5v5 game. WSL can use the Windows bridge.
@@ -103,6 +106,9 @@ See [the modeling contract](docs/MODELING.md), [action catalog](docs/ACTIONS.md)
 [architecture](docs/ARCHITECTURE.md) and [new research protocol](research/README.md) and [initial observed study](research/docs/INITIAL_STUDY.md).
 The [matched CQL/IQL/BC study](research/docs/POLICY_COMPARISON_20261105.md) records twelve
 further runs and their concentration and missing-history limits.
+The [robustness follow-up](research/docs/ROBUSTNESS_20261105.md) audits combat evidence,
+compares joint history masking and bounded critics, and measures abstention threshold
+transfer on separate development partitions.
 Actions are reconstructed from observed behavior, not logged player commands or known
 intent. State history is causal. Live coordinates, vision, waves, camp availability and
 cast history are not invented. Both teams and all players from a match stay together in
@@ -132,3 +138,13 @@ git diff --check
 
 Tests never call Riot or Data Dragon. Browser tests, when enabled with `RIFT_TEST_BROWSER`,
 use local synthetic UI fixtures. Full tests need the training and research packages.
+
+The [decision research follow-up](research/docs/DECISION_RESEARCH_20261105.md) tests
+minimax regret across critic seeds and controlled evidence loss. Its concentration and
+abstention tradeoffs remain experimental; it is not enabled in serving. Optional live
+availability capture stores aggregate masks and role/time buckets only, with no player
+identities, state values, recommendations or outcomes. Default use remains unrecorded.
+
+Read the four-page [mathematical synthesis](research/docs/SYNTHESIS_20261105.pdf)
+for the objective, training losses, decision-regret rule, results and next steps
+([editable source](research/docs/SYNTHESIS_20261105.md)).

@@ -187,16 +187,16 @@ class Workflow:
         config = TrainConfig(**settings)
         latest = self.state()
         old = latest.get("model", {})
-        from rift_common import network
+        from rift_common import network, observation_masks
 
-        from offline_rift.training import iql, trainer
+        from offline_rift.training import augmentation, iql, trainer
 
         signature = hashlib.sha256(
             json.dumps(
                 {"dataset": data["fingerprint"], "settings": settings}, sort_keys=True
             ).encode()
         )
-        for module in (network, trainer):
+        for module in (network, trainer, augmentation, observation_masks):
             signature.update(Path(module.__file__).read_bytes())
         if config.algorithm == "iql":
             signature.update(Path(iql.__file__).read_bytes())
@@ -281,6 +281,11 @@ def main():
             child.add_argument("--port", type=int, default=8765)
         else:
             child.add_argument("--once", action="store_true")
+            child.add_argument(
+                "--capture-availability",
+                type=Path,
+                help="Opt in to aggregate availability counts in a new directory",
+            )
     args = parser.parse_args()
     try:
         if args.command == "init":
@@ -387,6 +392,7 @@ def main():
                     role=args.role,
                     interval_seconds=args.interval,
                     transport=args.transport,
+                    capture_availability=args.capture_availability,
                 ).run(max_polls=1 if args.once else None)
     except KeyboardInterrupt:
         parser.exit(130, "Interrupted; existing data and progress reports are retained.\n")

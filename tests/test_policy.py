@@ -5,9 +5,12 @@ import pytest
 from rift_common.dataset import DatasetBuilder, load_dataset
 
 
-@pytest.mark.parametrize("algorithm", ["cql", "bc", "iql"])
+@pytest.mark.parametrize(
+    "algorithm,bounded,joint",
+    [("cql", False, 0), ("bc", False, 0), ("iql", False, 0), ("cql", True, 0.2)],
+)
 def test_real_optimizer_reload_serving_parity_and_immutable_outputs(
-    tmp_path, match_payloads, catalog, algorithm
+    tmp_path, match_payloads, catalog, algorithm, bounded, joint
 ):
     pytest.importorskip("torch")
     from offline_rift.inference.policy import NextActionPolicy
@@ -20,7 +23,15 @@ def test_real_optimizer_reload_serving_parity_and_immutable_outputs(
     builder.save(data, catalog=catalog, provenance={"fingerprint": "fixture"})
     output = tmp_path / "policy"
     result = PolicyTrainer(
-        TrainConfig(algorithm=algorithm, steps=3, batch_size=8, minimum_support=1, cpu_threads=1)
+        TrainConfig(
+            algorithm=algorithm,
+            steps=3,
+            batch_size=8,
+            minimum_support=1,
+            cpu_threads=1,
+            bounded_values=bounded,
+            joint_history_dropout=joint,
+        )
     ).train(data, output)
     assert result["status"] == "complete"
     report = result["report"]

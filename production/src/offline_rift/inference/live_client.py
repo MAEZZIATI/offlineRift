@@ -180,6 +180,7 @@ class LiveClientInference:
         endpoint=DEFAULT_ENDPOINT,
         timeout=3,
         verify_tls=False,
+        capture_availability=None,
     ):
         if team not in (100, 200) or not math.isfinite(interval_seconds) or interval_seconds <= 0:
             raise ValueError("Invalid team or polling interval")
@@ -188,6 +189,11 @@ class LiveClientInference:
         )
         try:
             self.policy = policy or NextActionPolicy(model_dir)
+            self.capture = None
+            if capture_availability is not None:
+                from offline_rift.inference.availability import AvailabilityCapture
+
+                self.capture = AvailabilityCapture(capture_availability)
         except Exception:
             self.source.close()
             raise
@@ -205,6 +211,8 @@ class LiveClientInference:
     def recommend(self, snapshot, team, actor="active", role=None):
         if actor == "active":
             if snapshot.active_player is None:
+                if self.capture is not None:
+                    self.capture.unresolved()
                 return {
                     "status": "needs_player",
                     "message": "Select the player you want advice for, or choose the team view.",
@@ -215,6 +223,10 @@ class LiveClientInference:
             team = snapshot.player(actor).team
         elif actor == "team":
             actor = None
+        if self.capture is not None:
+            self.capture.record(
+                snapshot, self.adapter.previous, self.policy.encoder, team, actor, role
+            )
         return self.policy.recommend(
             snapshot, team, actor, role=role, previous=self.adapter.previous
         )
@@ -225,6 +237,7 @@ class LiveClientInference:
 
     def run(self, *, max_polls=None):
         polls = 0
+        capture_status = "complete"
         try:
             while max_polls is None or polls < max_polls:
                 start = time.monotonic()
@@ -239,12 +252,19 @@ class LiveClientInference:
                 if max_polls is None or polls < max_polls:
                     time.sleep(max(0, self.interval_seconds - (time.monotonic() - start)))
         except KeyboardInterrupt:
-            pass
+            capture_status = "interrupted"
+        except BaseException:
+            capture_status = "failed"
+            raise
         finally:
-            self.close()
+            self.close(capture_status=capture_status)
 
-    def close(self):
-        self.source.close()
+    def close(self, *, capture_status="complete"):
+        try:
+            if self.capture is not None:
+                self.capture.close(capture_status)
+        finally:
+            self.source.close()
 
 
 def main():
@@ -258,6 +278,11 @@ def main():
     parser.add_argument("--interval", type=float, default=10)
     parser.add_argument("--transport", choices=("auto", "local", "windows"), default="auto")
     parser.add_argument("--once", action="store_true")
+    parser.add_argument(
+        "--capture-availability",
+        type=Path,
+        help="Opt in to aggregate availability counts in a new local directory",
+    )
     args = parser.parse_args()
     LiveClientInference(
         args.model,
@@ -266,4 +291,5 @@ def main():
         role=args.role,
         interval_seconds=args.interval,
         transport=args.transport,
+        capture_availability=args.capture_availability,
     ).run(max_polls=1 if args.once else None)

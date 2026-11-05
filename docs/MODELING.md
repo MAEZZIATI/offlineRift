@@ -105,6 +105,26 @@ cached matches participate in either training or development; training on the de
 rows would invalidate this comparison. Results are exploratory because these cached games
 have been consulted previously. No model is automatically promoted by the study runner.
 
+## Optional robustness experiments
+
+The research robustness suite uses the same trainer with `joint_history_dropout=0.2`
+and/or `bounded_values=True`; both default to disabled. Joint masking removes recent
+rates/deaths/structures and objective estimates together, recomputes feasibility, and
+rejects current-state omissions that would invalidate the recorded action. Rejection
+counts expose the resulting action-dependent augmentation bias. Sampled current/next
+inputs may be masked; stored transitions, boundaries, labels and rewards are unchanged.
+
+Bounded CQL applies tanh only to the value head and declares `bounded_shared_v1` explicitly.
+It alters CQL's optimization/pessimism and does not make values calibrated. Existing
+bundles are never clipped or reinterpreted. It is unavailable for IQL or BC.
+
+Research-only coverage calibration uses disjoint halves of development matches and
+confidence ranks per role/team, retaining whole ties. It evaluates both separately fitted
+cold-start thresholds and transfer of observed-state thresholds into cold-start states.
+Thresholds are not installed in serving. Confidence mass is neither action correctness
+nor win probability; previously consulted development partitions do not supply a fresh
+confirmatory test. See the [observed results](../research/docs/ROBUSTNESS_20261105.md).
+
 ## Evaluation and deployment boundaries
 
 All actors and both teams from each match share a split. Reports include action support,

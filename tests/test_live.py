@@ -1,8 +1,10 @@
 from unittest.mock import Mock
 
 import numpy as np
+import pytest
 from offline_rift.inference.live_client import LiveClientInference, LiveStateAdapter
 from rift_common.actions import ROLES
+from rift_common.artifacts import read_json
 from rift_common.state import StateEncoder
 from rift_common.timeline import read_match
 
@@ -75,3 +77,53 @@ def test_active_player_is_not_silently_replaced_with_team():
     assert client.recommend(snapshot, 100)["status"] == "needs_player"
     client.policy.recommend.assert_not_called()
     client.close()
+
+
+def test_opt_in_availability_capture_masks_history_and_excludes_identity(tmp_path, catalog):
+    policy = Mock(encoder=StateEncoder(catalog))
+    client = LiveClientInference(
+        policy=policy, session=Mock(), capture_availability=tmp_path / "capture"
+    )
+    first = client.adapter.snapshot(live_data(120))
+    client.recommend(first, 100)
+    client.recommend(first, 100)
+    later = client.adapter.snapshot(live_data(180))
+    client.recommend(later, 100, role="TOP")
+    report = read_json(tmp_path / "capture/report.json")
+    assert report["polls"] == 2 and report["duplicate_polls"] == 1
+    assert report["known_feature_counts"]["self_cs_rate_known"] == 1
+    assert report["observation_sessions"] == 1
+    assert len(report["cells"]) == 2
+    stored = (tmp_path / "capture/report.json").read_text()
+    assert "Player1" not in stored and "Champion" not in stored
+    assert "recommendation" not in report and "observations" not in report
+    reset = client.adapter.snapshot(live_data(0))
+    client.recommend(reset, 100)
+    client.close(capture_status="interrupted")
+    report = read_json(tmp_path / "capture/report.json")
+    assert report["status"] == "interrupted" and report["observation_sessions"] == 2
+    with pytest.raises(FileExistsError):
+        LiveClientInference(
+            policy=policy, session=Mock(), capture_availability=tmp_path / "capture"
+        )
+
+
+def test_capture_is_disabled_by_default_and_interrupt_retains_progress(
+    tmp_path, catalog, monkeypatch
+):
+    client = LiveClientInference(policy=Mock(), session=Mock())
+    assert client.capture is None
+    client.close()
+    client = LiveClientInference(
+        policy=Mock(encoder=StateEncoder(catalog)),
+        session=Mock(),
+        capture_availability=tmp_path / "capture",
+    )
+
+    def interrupt():
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(client, "fetch_live_data", interrupt)
+    client.run(max_polls=1)
+    report = read_json(tmp_path / "capture/report.json")
+    assert report["status"] == "interrupted" and report["polls"] == 0

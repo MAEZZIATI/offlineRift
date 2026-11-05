@@ -5,17 +5,17 @@ from pathlib import Path
 from shutil import copy2
 
 import numpy as np
-from offline_rift.training import iql, trainer
+from offline_rift.training import augmentation, iql, trainer
 from offline_rift.training.trainer import PolicyTrainer, TrainConfig
 from offline_rift.workflow import Workflow
-from rift_common import network
+from rift_common import network, observation_masks
 from rift_common.artifacts import atomic_json, file_digest
 
 from rift_research import evaluation
 from rift_research.evaluation import describe_dataset, evaluate_policy
 
 
-def run_study(config, output, *, steps=10000, seeds=(42, 43), samples=500):
+def run_study(config, output, *, steps=10000, seeds=(42, 43), samples=500, suite="algorithms"):
     output = Path(output)
     if output.exists():
         raise FileExistsError(output)
@@ -32,10 +32,20 @@ def run_study(config, output, *, steps=10000, seeds=(42, 43), samples=500):
         "iql-expectile-0.7": {"algorithm": "iql", "expectile": 0.7},
         "iql-expectile-0.9": {"algorithm": "iql", "expectile": 0.9},
     }
+    if suite == "robustness":
+        variants = {
+            "cql-alpha-0.1": {},
+            "cql-joint-history": {"joint_history_dropout": 0.2},
+            "cql-bounded": {"bounded_values": True},
+            "cql-bounded-joint": {"bounded_values": True, "joint_history_dropout": 0.2},
+        }
+    elif suite != "algorithms":
+        raise ValueError("Unknown experiment suite")
     output.mkdir(parents=True, exist_ok=False)
     sources = {
         **{
-            module.__name__: Path(module.__file__) for module in (trainer, iql, network, evaluation)
+            module.__name__: Path(module.__file__)
+            for module in (trainer, augmentation, iql, network, observation_masks, evaluation)
         },
         "rift_research.experiments": Path(__file__),
     }
@@ -46,6 +56,7 @@ def run_study(config, output, *, steps=10000, seeds=(42, 43), samples=500):
     report = {
         "status": "building",
         "split_seed": 42,
+        "suite": suite,
         "optimizer_seeds": list(seeds),
         "variants": variants,
         "base_settings": asdict(base),

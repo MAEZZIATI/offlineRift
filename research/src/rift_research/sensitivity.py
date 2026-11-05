@@ -9,6 +9,7 @@ from rift_common.actions import ACTION_NAMES, GROUPS, feasible_actions
 from rift_common.artifacts import atomic_json, file_digest, read_json
 from rift_common.dataset import load_dataset
 from rift_common.metrics import behavior_metrics
+from rift_common.observation_masks import COLD_START_FIELDS, HEALTH_FIELDS
 
 
 def analyze_study(study, output):
@@ -24,24 +25,8 @@ def analyze_study(study, output):
     arrays, metadata = load_dataset(dataset)
     names = metadata["feature_names"]
     scenarios = {
-        "unobserved_health": ["self_health", "self_health_known"],
-        "cold_start_history": [
-            f"{field}{suffix}"
-            for field in (
-                "self_cs_rate",
-                "self_level_rate",
-                "ally_deaths_60",
-                "enemy_deaths_60",
-                "own_towers_lost",
-                "enemy_towers_lost",
-            )
-            for suffix in ("", "_known")
-        ]
-        + [
-            f"{kind}_{field}"
-            for kind in ("dragon", "baron", "herald")
-            for field in ("eta", "available", "enabled")
-        ],
+        "unobserved_health": list(HEALTH_FIELDS),
+        "cold_start_history": list(COLD_START_FIELDS),
     }
     torch.set_num_threads(2)
     output.mkdir(parents=True, exist_ok=False)

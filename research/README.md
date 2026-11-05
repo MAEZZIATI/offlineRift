@@ -7,6 +7,11 @@ are not evidence for this new action contract or new policies.
 
 See the [matched CQL/IQL/BC comparison](docs/POLICY_COMPARISON_20261105.md) for twelve
 completed runs, seed and missing-history diagnostics, action replays and the cleanup audit.
+The [robustness follow-up](docs/ROBUSTNESS_20261105.md) records the combat-label audit,
+eight CQL augmentation/bounding runs and separate coverage calibration/evaluation.
+The [decision research follow-up](docs/DECISION_RESEARCH_20261105.md) tests an experimental
+minimax decision rule across seeds/evidence omissions and availability-conditioned
+calibration, with a [predefined exploratory protocol](docs/NEXT_STUDY_PROTOCOL.md).
 
 ## Initial study
 
@@ -51,6 +56,16 @@ rift-research study --config workflow.json --output data/research/next-actions-s
   --steps 10000 --seeds 42 43
 rift-research sensitivity --study data/research/next-actions-study \
   --output data/research/next-actions-study-sensitivity
+rift-research study --config workflow.json --output data/research/next-actions-robustness \
+  --suite robustness --steps 10000 --seeds 42 43
+rift-research audit-combat --dataset /path/to/transitions.npz --raw /path/to/raw \
+  --output /path/to/new/combat-audit
+rift-research calibrate-coverage --study data/research/next-actions-robustness \
+  --output /path/to/new/coverage-analysis
+rift-research calibrate-coverage --study data/research/next-actions-robustness \
+  --conditional-evidence --output /path/to/new/conditional-coverage
+rift-research decision-regret --study data/research/next-actions-robustness \
+  --output /path/to/new/decision-regret
 ```
 
 Evaluation reproduces serving predictions on the saved match split and reports a
@@ -74,3 +89,10 @@ reports agreement across optimizer seeds, recorded-action critic ranges and pred
 changes when health or cold-start history is masked. Masks represent missing evidence;
 they do not invent observations or alter target outcomes. These controlled omissions
 do not measure the actual live input distribution or policy usefulness.
+
+The robustness suite compares ordinary CQL, joint missing-history augmentation, bounded
+critics and their combination through the same trainer. Coverage analysis partitions
+development matches into disjoint calibration/evaluation halves, fits group-specific
+confidence rank thresholds, and reports both scenario-specific calibration and transfer
+of observed-state thresholds to cold-start observations. It does not modify serving or
+estimate action correctness. Threshold ties and rare-action loss require inspection.

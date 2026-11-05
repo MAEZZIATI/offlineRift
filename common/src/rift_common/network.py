@@ -7,13 +7,14 @@ from rift_common.actions import Action
 
 
 class OptionNetwork(nn.Module):
-    def __init__(self, size, *, separate_actor=False):
+    def __init__(self, size, *, separate_actor=False, bounded_values=False):
         super().__init__()
         self.encoder = nn.Sequential(
             nn.Linear(size, 128), nn.ReLU(), nn.Linear(128, 128), nn.ReLU()
         )
         self.value = nn.Linear(128, len(Action))
         self.behavior = nn.Linear(128, len(Action))
+        self.bounded_values = bounded_values
         self.actor_encoder = (
             nn.Sequential(nn.Linear(size, 128), nn.ReLU(), nn.Linear(128, 128), nn.ReLU())
             if separate_actor
@@ -23,7 +24,8 @@ class OptionNetwork(nn.Module):
     def forward(self, observations):
         context = self.encoder(observations)
         actor = self.actor_encoder(observations) if self.actor_encoder is not None else context
-        return self.value(context), self.behavior(actor)
+        values = self.value(context)
+        return values.tanh() if self.bounded_values else values, self.behavior(actor)
 
 
 def action_support(counts, groups, masks, minimum=20):
