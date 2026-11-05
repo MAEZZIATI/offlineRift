@@ -4,9 +4,13 @@ import json
 from unittest.mock import Mock
 
 import pytest
-
-from offline_rift.cohort import collect_cohort, prepare_cohort, prepare_ranked_cohort, select_cohort
 from offline_rift.workflow import ResearchWorkflow, atomic_json
+from rift_research.cohort import (
+    collect_cohort,
+    prepare_cohort,
+    prepare_ranked_cohort,
+    select_cohort,
+)
 
 
 def test_cohort_uses_payload_identity_and_uniform_role_strata(

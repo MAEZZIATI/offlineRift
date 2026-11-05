@@ -1,6 +1,6 @@
-"""Compatibility entry point for :mod:`offline_rift.pipeline.data_pipeline`."""
+"""Compatibility entry point for :mod:`rift_common.pipeline.data_pipeline`."""
 
-from offline_rift.pipeline.data_pipeline import (
+from rift_common.pipeline.data_pipeline import (
     REGIONS,
     RiotAPIError,
     RiotDataIngestor,

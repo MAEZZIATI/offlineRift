@@ -77,7 +77,49 @@ The browser polls at the configured interval, stops while hidden or paused, and
 discards expired recommendations. There is no background inference without requests,
 match history collection, or new persistence. The server keeps only the latest state;
 multiple viewers share its cache. The existing PyTorch/d3rlpy model remains the main
-memory cost; a browser interface does not remove that dependency.
+memory cost for hybrid bundles. Classifier-only bundles serve with Torch and do not
+require d3rlpy.
+
+## Layout and controls
+
+The session bar identifies the loaded model as CQL, CQL + neural model, or neural
+classifier. Team selection is explicit and remains selected across refreshes. The
+main card shows one model estimate, a static map-check prompt and the observation's
+game time. The clock is not advanced between observations.
+
+Three other supported patterns appear in score order. All twelve raw scores and the
+model's validation metrics are in expandable sections. No score is a probability.
+The age and freshness indicator describe the cached observation's remaining lifetime;
+expired, paused and failed observations clear suggestions, alternatives and scores.
+
+Use **Focus view** (keyboard **F**) to hide secondary panels while retaining the main
+suggestion, game clock and controls. Use **Pause** / **Resume** (keyboard **P**) to
+control polling. Shortcuts apply only in the dashboard tab and do not intercept text
+inputs or modified keys. Hidden tabs still pause requests. The layout stacks on narrow
+screens, with visible focus states, labeled controls and reduced-motion support.
+
+Assets are cached by the Python server at startup: restart the dashboard command and
+reload the browser after updating the HTML, CSS or JavaScript.
+
+## Visual identity
+
+The interface uses original geometric SVG marks, a dark ink and muted brass palette,
+system fonts, and an original layout. It includes no Riot logos, character/item art,
+game maps, proprietary fonts or copied client panels. A visible footer carries the
+developer-policy non-endorsement notice. This design does not establish legal approval
+or approval of the app's other functionality.
+
+The design references were checked on 2026-11-05:
+[Riot's general developer policies](https://developer.riotgames.com/policies/general)
+require distinct product styling and a visible legal notice;
+[Legal Jibber Jabber](https://www.riotgames.com/en/legal) also addresses original
+contributions and restrictions on branding. Publication, registration and other product
+obligations remain separate from this local UI redesign.
+
+Optional real-browser interaction tests are in `tests/test_dashboard_browser.py`.
+Set `RIFT_TEST_BROWSER` to an installed Chromium/headless-shell executable to run them;
+without it those tests skip. They use synthetic local UI fixtures, not live games,
+cover desktop/mobile widths and all three model modes, and download no browser.
 
 ## Reading a suggestion
 
@@ -94,9 +136,9 @@ validation predictions or a training label exceeding 80% of observations.
 The historical five-action baseline chose the fallback on every validation state. A
 working live dashboard does not establish useful strategy or win-rate improvement.
 Coordinates, team total gold, and reliable ability cooldowns remain unavailable and
-masked; objective timing remains an explicit estimate. See [current experiments](RESULTS_V2.md) and the [historical results](RESULTS.md).
+masked; objective timing remains an explicit estimate. See [current experiments](../research/docs/RESULTS_V2.md) and the [historical results](../research/docs/RESULTS.md).
 
-The current hybrid model displays balanced macro ranking scores rather than raw Q-values.
-Hover over a score row to see its discounted-return Q estimate. These scores are not
-probabilities. Model details include balanced accuracy and macro F1 alongside majority
-baseline and heuristic agreement. Every validation metric concerns weak labels.
+Hybrid and classifier models display formation ranking scores. Expand all patterns to
+inspect raw scores; hybrid rows also expose Q estimates on hover. Classifier-only rows
+have no Q values. Model details include balanced accuracy and macro F1 alongside the
+majority baseline and label agreement. Every validation metric concerns weak labels.

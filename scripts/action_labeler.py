@@ -1,6 +1,6 @@
-"""Compatibility entry point for :mod:`offline_rift.pipeline.action_labeler`."""
+"""Compatibility entry point for :mod:`rift_common.pipeline.action_labeler`."""
 
-from offline_rift.pipeline.action_labeler import (
+from rift_common.pipeline.action_labeler import (
     ACTION_NAMES,
     MacroActionLabeler,
     MDPDatasetBuilder,

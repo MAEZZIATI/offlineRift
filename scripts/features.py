@@ -1,6 +1,6 @@
-"""Compatibility entry point for :mod:`offline_rift.pipeline.features`."""
+"""Compatibility entry point for :mod:`rift_common.pipeline.features`."""
 
-from offline_rift.pipeline.features import (
+from rift_common.pipeline.features import (
     MAP_SIZE,
     PITS,
     ROLES,

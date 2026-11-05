@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import pytest
-
-from offline_rift.pipeline.features import ROLES
+from rift_common.pipeline.features import ROLES
 
 
 @pytest.fixture

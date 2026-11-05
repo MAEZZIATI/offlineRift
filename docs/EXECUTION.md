@@ -24,7 +24,7 @@ on shell activation or a `rift` command from another Python installation, use:
 ```
 
 `python workflow.py ...` remains available as a compatibility launcher. The workflow
-implementation lives in `src/offline_rift/`; do not execute that source file directly.
+implementation lives in `production/src/offline_rift/`; do not execute that source file directly.
 If importing `offline_rift` fails, refresh this environment explicitly:
 
 ```bash
@@ -111,7 +111,7 @@ rift ui
 
 Open **http://localhost:8765** in your browser, including your Windows browser when the
 command runs in WSL. Choose your side in the interface. The latest completed policy is
-loaded once, and the shared snapshot updates at most once every ten seconds while the
+loaded once, and the shared snapshot updates at most once every 30 seconds while the
 dashboard is viewed. No frontend installation or build is needed. See [the UI guide](LIVE_UI.md).
 
 The terminal JSON interface also remains available:
@@ -125,7 +125,7 @@ rift live --team 100 --interval 30
 ```
 
 Use team 100 for blue/ORDER and 200 for red/CHAOS. `--once` performs a single check; the
-second command keeps polling every ten seconds until Ctrl-C. The latest completed local
+second command keeps polling every 30 seconds until Ctrl-C. The latest completed local
 policy is chosen automatically. Live polling does not require `RIOT_API_KEY`.
 
 The API is `https://127.0.0.1:2999/liveclientdata/allgamedata`. It becomes available during
@@ -194,4 +194,4 @@ training profile. Q-values are discounted-return estimates, not win probabilitie
 
 The current first real-data model predicted the fallback action on every held-out state.
 It is a pipeline baseline, not evidence of useful tactical advice. See
-[the recorded real-data results](RESULTS.md) before interpreting recommendations.
+[the recorded real-data results](../research/docs/RESULTS.md) before interpreting recommendations.

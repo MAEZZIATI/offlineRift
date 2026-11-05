@@ -9,19 +9,26 @@ not establish useful strategy, optimality, or calibrated win probabilities.
 
 ## Architecture
 
-- `src/offline_rift/workflow.py`: configured-player collection, patch catalogs, immutable dataset
+- `production/src/offline_rift/workflow.py`: configured-player collection, patch catalogs, immutable dataset
   builds, versioned training runs, and latest-completed artifact references.
-- `src/offline_rift/pipeline/data_pipeline.py`: Riot API routing/retries and causal timeline reconstruction.
-- `src/offline_rift/pipeline/features.py`: the shared feature contract, item catalog, and objective estimates.
-- `src/offline_rift/pipeline/action_labeler.py`: weak macro labels, rewards, explicit transitions, and validation.
-- `src/offline_rift/training/rl_agent.py`: d3rlpy CQL training and policy loading.
-- `src/offline_rift/inference/live_client.py`: local polling and live feature adaptation.
-- `src/offline_rift/training/train_macro_model.py`: direct training CLI; prefer the workflow for normal operation.
+- `common/src/rift_common/pipeline/data_pipeline.py`: Riot API routing/retries and causal timeline reconstruction.
+- `common/src/rift_common/pipeline/features.py`: the shared feature contract, item catalog, and objective estimates.
+- `common/src/rift_common/pipeline/action_labeler.py`: weak macro labels, rewards, explicit transitions, and validation.
+- `production/src/offline_rift/training/`: maintained CQL and imitation trainers.
+- `production/src/offline_rift/inference/policy.py`: portable runtime policy loading and scoring.
+- `production/src/offline_rift/inference/live_client.py`: local polling and live feature adaptation.
+- `production/src/offline_rift/training/train_macro_model.py`: direct training CLI; prefer the workflow for normal operation.
 - `tests/`: deterministic fixtures, mocked transport, and short real optimizer tests.
-- `docs/`: workflow, backend contract, and results from specific real-data experiments.
+- `research/src/rift_research/`: optional experiments, cohort studies, audit and labeling.
+- `common/src/rift_common/models/`: shared Torch models, scoring, metrics and match splits.
+- `common/src/rift_common/artifacts.py`: atomic persistence and bundle integrity.
+- `docs/`: operational workflow and backend contract.
+- `research/docs/`: results, research plans and papers.
 - `configs/`: tracked configuration examples; local `workflow.json` remains at the root.
-- `scripts/` contains compatibility entry points. Keep implementation in
-  `src/offline_rift/` and import that package in new code and tests.
+- `scripts/` contains compatibility entry points. Keep application implementation in
+  `production/`, reusable code in `common/`, and experimental code in `research/`.
+  Production must never import research; common must import neither application.
+  Keep every test in the single root `tests/` folder.
 
 ## Development conventions
 
@@ -30,7 +37,7 @@ not establish useful strategy, optimality, or calibrated win probabilities.
 - Prefer `rift`/`python workflow.py` commands for end-user workflows. Collection is
   currently scoped to Faker's configured account; preserve that scope unless requested.
 - Centralize feature definitions and availability masks in
-  `src/offline_rift/pipeline/features.py`. Preserve
+  `common/src/rift_common/pipeline/features.py`. Preserve
   training/live feature order and scaling. Version incompatible schemas explicitly.
 - Keep documentation and CLI help synchronized with behavior. Use real-data examples;
   synthetic fixtures belong in tests and must not be presented as trained strategy.

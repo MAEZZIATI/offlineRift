@@ -2,9 +2,9 @@
 
 import copy
 
-from offline_rift.audit import audit_corpus, diagnose_snapshot, herald_timing_audit
-from offline_rift.pipeline.data_pipeline import TimelineProcessor
-from offline_rift.pipeline.features import FeatureConfig
+from rift_common.pipeline.data_pipeline import TimelineProcessor
+from rift_common.pipeline.features import FeatureConfig
+from rift_research.audit import audit_corpus, diagnose_snapshot, herald_timing_audit
 
 
 def test_audit_death_flag_ignores_future_events(match_payloads):

@@ -1,13 +1,14 @@
 # Backend reference
 
 Prefer `workflow.py` for normal operation. Lower-level interfaces remain available.
-Implementation lives in `src/offline_rift/`; root modules preserve existing imports and
-script commands. See [Project structure](STRUCTURE.md).
+Application code lives in `production/src/offline_rift/`, and reusable contracts live
+in `common/src/rift_common/`. Compatibility scripts delegate to those packages.
+See [Project structure](STRUCTURE.md) for the import and command migration.
 
 ## Ingestion
 
 ```python
-from offline_rift.pipeline.data_pipeline import RiotDataIngestor
+from rift_common.pipeline.data_pipeline import RiotDataIngestor
 
 api = RiotDataIngestor(api_key, "asia")
 try:
@@ -46,8 +47,8 @@ bundles. Policy loading checks the contract and model dimensions.
 ## Labels and MDP datasets
 
 ```python
-from offline_rift.pipeline.action_labeler import MacroActionLabeler, MDPDatasetBuilder, load_dataset
-from offline_rift.pipeline.features import FeatureConfig, ItemCatalog
+from rift_common.pipeline.action_labeler import MacroActionLabeler, MDPDatasetBuilder, load_dataset
+from rift_common.pipeline.features import FeatureConfig, ItemCatalog
 
 action, confidence = MacroActionLabeler().classify(snapshots[0], team=100)
 builder = MDPDatasetBuilder(FeatureConfig(), ItemCatalog(item_json), reward_mode="sparse")
@@ -91,7 +92,8 @@ observations are stored but never bootstrapped.
 ## Training and inference
 
 ```python
-from offline_rift.training.rl_agent import MacroPolicy, OfflineMacroTrainer
+from offline_rift.inference.policy import MacroPolicy
+from offline_rift.training.rl_agent import OfflineMacroTrainer
 
 trainer = OfflineMacroTrainer(device="cpu", batch_size=64, alpha=1.0, gamma=0.99, seed=42)
 report = trainer.train("custom.npz", "models/my-run", n_steps=10000)
@@ -117,17 +119,37 @@ rift-train --dataset custom.npz --output models/my-run --steps 10000
 rift-live --model models/my-run --team 100 --once
 ```
 
-Direct CLIs retain explicit paths and original overwrite behavior. Prefer the workflow
-wrapper for automatic IDs, reuse checks, and provenance.
+Direct CLIs retain explicit paths and require a new output directory. Prefer the workflow
+wrapper for reviewed publication, automatic IDs, reuse checks, and provenance.
+
+`ImitationTrainer` in `offline_rift.training.imitation` trains only the classifier and
+exports an integrity-checked `imitation-v1` bundle. `rift-train --algorithm imitation`
+exposes this path; `--split-from` reuses a reference bundle's exact match split. Its
+inverse-square-root-frequency sampling is paired with unweighted cross entropy and
+heuristic confidence weights. The historical uniform sampler retains inverse-square-root
+class loss weights. Training keeps the corpus on CPU and transfers sampled batches to
+the selected device. CPU memory still scales with the in-memory NPZ corpus; this is
+not an out-of-core or distributed trainer.
 
 Recommendations contain action ID/name, prediction method, selected `q_value`, all
 twelve `q_values`, and separate `macro_scores` for supervised modes. The default hybrid
 uses balanced neural pattern logits plus a bounded Q tie-breaker; it does not choose
 the largest raw Q-value. Unsupported classes and objective timing violations are masked.
 `prediction_mode="balanced_bc"` uses the pattern head; `"cql"` selects the raw CQL baseline.
-See [model directions](MODEL_IMPROVEMENTS.md) for loss weighting, score formula and limits.
+See [model directions](../research/docs/MODEL_IMPROVEMENTS.md) for loss weighting, score formula and limits.
+Classifier-only bundles return `null` for `q_value` and `q_values`; the dashboard
+displays formation evidence scores without a return estimate.
 Q-values estimate discounted returns, not calibrated win probabilities. Live output
 reports partial observations and unavailable features. Connection failures emit offline
 status; malformed states emit invalid-state status. Event history reconstruction is
 idempotent across polls and naturally resets for a new game. No stale recommendation
 is returned after an error.
+
+## Objective-rule and review contract
+
+New workflow configurations pin `sr-2026-v3`; historical feature metadata defaults to
+`legacy-v1` for reproducibility. Corrected datasets carry rule hashes and reject unsupported
+patches. Feature dimensions/order are preserved; objective evidence masks represent unknown
+availability. Normal workflow training verifies two independent exports, adjudication and
+dataset/rule/labeler hashes before constructing an optimizer. See [the scoped rules and
+review protocol](../research/docs/OBJECTIVE_RULES.md). Direct research training does not authorize promotion.

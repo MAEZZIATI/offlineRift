@@ -1,92 +1,85 @@
-# Project structure
+# Workspace structure and dependencies
+
+The code is physically separated by responsibility within this repository:
 
 ```text
 offlineRift/
-  src/offline_rift/              # Backend implementation
-    __init__.py
-    __main__.py                 # python -m offline_rift
-    workflow.py                 # Collection/build/train orchestration
-    pipeline/
-      data_pipeline.py          # Riot requests and timeline reconstruction
-      features.py               # Shared state schema and objective/item features
-      action_labeler.py         # Weak labels and MDP dataset validation
-      actions.py                # Current versioned macro action contract
-    training/
-      rl_agent.py               # CQL + balanced predictor training and policy bundles
-      encoders.py               # Serializable neural team set encoder
-      macro_predictor.py        # Weighted classifier and bounded hybrid ranking
-      evaluation.py             # Per-action diagnostics and balanced metrics
-      train_macro_model.py      # Direct training CLI
-    inference/
-      live_client.py            # Local live-game adaptation and polling
-      transport.py              # Local HTTP and WSL-to-Windows loopback access
-    ui/
-      service.py                # Shared on-demand snapshot cache and model summary
-      server.py                 # Standard-library HTTP server and UI CLI
-      static/                   # Buildless HTML, CSS, and JavaScript
-  tests/
-    conftest.py                 # Shared deterministic match fixtures
-    test_workflow.py            # Workflow/cache/persistence integration tests
-    pipeline/test_pipeline.py
-    training/test_training.py
-    inference/test_live.py
-  configs/
-    classic_timers.json         # Illustrative timer configuration
-  docs/                         # Workflow, interfaces, recorded results, structure
-  AGENTS.md                     # Repository conventions and validation instructions
-  README.md                     # Setup and everyday commands
-  pyproject.toml                # Dependencies, packaging, and command entry points
-  workflow.py                   # Compatibility launcher for older workflow commands
-  scripts/                      # Thin compatibility command launchers
-  workflow.json                 # Local settings, ignored by Git
-  data/                         # Local raw games, catalogs, datasets, manifests
-  models/                       # Local learned weights and training reports
+  production/src/offline_rift/
+    workflow.py                 # Stable collection/build/train/publication workflow
+    training/                   # Maintained CQL and classifier trainers
+    inference/                  # Policy loading, live adaptation and transport
+    ui/                         # Dashboard service, HTTP server and browser assets
+  common/src/rift_common/
+    pipeline/                   # Causal timeline, shared features, labels and validation
+    models/                     # Torch encoders, scoring, metrics, match splits, optional CQL factory
+    artifacts.py                # Atomic persistence, digests and bundle integrity
+    review.py                   # Portable review contracts and promotion checks
+  research/
+    pyproject.toml              # Separately installed optional package
+    src/rift_research/          # Compare, evaluation, memory, cohort, audit and review
+    docs/                       # Historical findings, plans and papers
+  tests/                        # Every test and the shared conftest.py
+  docs/                         # Operational guides and production interfaces
+  configs/                      # Tracked examples; local workflow.json is ignored
+  scripts/                      # Thin compatibility launchers, no implementation
+  pyproject.toml                # Builds production + common; excludes research
+  workflow.py                   # Compatibility launcher
+  data/                         # Local cached games, datasets and research artifacts
+  models/                       # Local historical production bundles
 ```
 
-The files in `scripts/` are small compatibility launchers. They re-export the existing
-public interfaces and delegate script entry points to the package. They do not duplicate
-implementation.
+```mermaid
+flowchart LR
+    Production --> Common
+    Research --> Common
+    Research --> Production
+```
 
-## Commands and imports
+Common code imports neither application nor research packages. The inference package
+imports no training orchestration. These boundaries are enforced in `tests/test_architecture.py`.
+Research can invoke the production collector/trainers and load production bundles;
+production commands remain usable when research is not installed.
 
-Existing commands remain supported:
+## Packaging and commands
+
+The root wheel includes `offline_rift` from `production/src` and `rift_common` from
+`common/src`. Keeping common in the same distribution pins serving and feature contracts
+together. `research/pyproject.toml` builds `offline-rift-research` and depends on the
+production distribution, without copying shared implementation.
 
 ```bash
-rift status
-rift ui
-rift run --refresh
-python scripts/workflow.py status
-python scripts/train_macro_model.py --help
+uv pip install --python .venv/bin/python -e '.[train,dev]' -e ./research
+rift --help
+rift-train --help
+rift-research --help
 ```
 
-You can also run the workflow as a package:
+The former `rift research-evaluate`, `research-memory`, `research-cohort`, `research-audit`
+and `research-review` commands now live under `rift-research evaluate`, `memory`, `cohort`,
+`audit` and `review`. This is an intentional CLI migration. For frozen serving comparisons,
+use `rift-research compare`; the older `evaluate` command retains CQL-specific ablations.
 
-```bash
-python -m offline_rift status
-```
-
-New Python integrations should import the implementation package:
+Shared Python imports now use `rift_common`:
 
 ```python
-from offline_rift.pipeline.data_pipeline import RiotDataIngestor, TimelineProcessor
-from offline_rift.pipeline.action_labeler import MDPDatasetBuilder
-from offline_rift.pipeline.features import FeatureConfig, FeatureEncoder
-from offline_rift.training.rl_agent import OfflineMacroTrainer, MacroPolicy
-from offline_rift.inference.live_client import LiveClientInference
-from offline_rift.workflow import ResearchWorkflow
+from rift_common.pipeline.features import FeatureConfig, FeatureEncoder
+from rift_common.pipeline.action_labeler import MDPDatasetBuilder, load_dataset
+from offline_rift.inference.policy import MacroPolicy
+from offline_rift.training.imitation import ImitationTrainer
 ```
 
-After updating a checkout, refresh the editable installation so the package and console
-entry points resolve correctly:
+Compatibility scripts still delegate to these implementations. Existing artifact paths
+and local workflow configuration are preserved. Source fingerprints can create new
+versioned datasets after migration; they never replace historical artifacts in place.
 
-```bash
-uv pip install -e '.[train,dev]'
-```
+## Model bundles
 
-Local settings and artifacts retain their original locations. The current `rift-v2` /
-`macro-v2` model requires rebuilding and retraining older bundles; stored history remains
-on disk. See [model improvements](MODEL_IMPROVEMENTS.md) for the current contract.
+Classifier bundles contain `metadata.json`, `macro_predictor.pt`, `bundle.json` and
+`run.json`. The loader verifies metadata/weight hashes before deserialization and uses
+Torch's weights-only loading. Checksums detect corruption; they do not authenticate a
+publisher. CQL/hybrid legacy bundles continue to load with their original `policy.d3`
+and optional predictor. No filename/schema migration of stored bundles is required.
 
-Source hashes participate in dataset/model fingerprints. The next explicit build/run
-can therefore create a new artifact after this source-layout change; previous artifacts
-are retained. This is the existing source-change detection behavior.
+`MacroPolicy.predict_batch` and `recommend` use the same scoring implementation. Serving
+uses bounded batches. Classifier bundles do not import d3rlpy, research or training
+orchestration, and return `null` Q values rather than inventing returns.

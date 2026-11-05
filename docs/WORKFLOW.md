@@ -1,25 +1,29 @@
 # Real-data workflow
 
-For read-only frozen-model experiments, use `rift research-evaluate --help`. It compares
-raw/filtered CQL, imitation and hybrid predictions with paired match-bootstrap intervals.
-Use `--unseen` with a newly built compatible dataset to exclude every saved training
-and development match. It does not retrain or publish a model. See the
-[research synthesis](RESEARCH_SYNTHESIS.md).
+Research commands and independent labeling are in the separately installed
+[research workspace](../research/README.md). Production commands do not import it.
+New workflows use pinned `sr-2026-v3` objective estimates for patches 16.16–16.22;
+corrected-model promotion still requires the portable acceptance report in
+`label_review.report`. Labeling may be deferred while candidates are trained separately.
 
-For an explicitly requested broader-account pilot, use `rift research-cohort --help`.
-It saves a separate role-stratified account configuration; `--collect` uses the existing
-authenticated, resumable collector. `--resume PATH --collect` keeps the selected cohort.
-See the [data plan](DATA_PLAN.md) for sampling limitations and environment-key handling.
+## Experimental training with review deferred
 
-`rift research-memory --help` trains fixed-split supervised history experiments or,
-with `--evaluate-from`, evaluates their frozen weights on unseen matches. Optional
-`--methods repeat120` and `--control-from` supply a recurrent current-information control.
-These experimental bundles do not change the latest live model. See the
-[memory protocol and results](MEMORY_STUDY.md).
+Label review is a separate activity and can be postponed. To train an experimental
+bundle from an existing validated dataset, use the existing direct CLI:
 
-`rift research-audit --help` reproduces the prepared labels, checks causal evidence,
-and writes a blinded local review viewer. Its automated flags do not substitute for
-independent annotator judgments. See [the audit findings](LABEL_AUDIT.md).
+```bash
+.venv/bin/rift-train --algorithm imitation --encoder-type mlp \
+  --dataset /path/to/development/transitions.npz \
+  --output /path/to/new/research/model --steps 10000 --seed 42
+```
+
+Use a new output directory for each experiment. Keep reserved evaluation matches out
+of the input dataset. The trainer keeps both teams from each match together in its
+train/validation split and reports agreement with heuristic labels, action coverage,
+collapsed predictions and the majority baseline. These are diagnostics against
+unreviewed targets, not evidence of strategic quality. This command does not update
+the workflow's active model reference. Label review and adjudication remain required
+for corrected-model promotion through `rift train` or `rift run`.
 
 ## Start with your downloaded games
 
@@ -33,7 +37,8 @@ The workspace's `workflow.json` was initialized from the original 100-game seed 
 uses Asia routing, and filters queue 420. It now retains separately verified additional
 accounts. No identity lookup or match re-download is needed for cached payloads.
 `run` resolves patch catalogs, builds and validates transitions, and trains CQL
-on real data. It skips completed work when inputs and settings are unchanged.
+on real data once the review gate is satisfied. It skips completed work when inputs
+and settings are unchanged.
 
 For a fresh checkout with cached files but no configuration:
 

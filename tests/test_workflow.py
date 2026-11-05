@@ -4,11 +4,10 @@ import json
 from unittest.mock import Mock
 
 import pytest
-
-from offline_rift.pipeline.action_labeler import load_dataset
-from offline_rift.pipeline.data_pipeline import TimelineProcessor
-from offline_rift.pipeline.features import FeatureConfig
 from offline_rift.workflow import CatalogCache, ResearchWorkflow, atomic_json
+from rift_common.pipeline.action_labeler import load_dataset
+from rift_common.pipeline.data_pipeline import TimelineProcessor
+from rift_common.pipeline.features import FeatureConfig
 
 
 def prepare(tmp_path, match_payloads):
@@ -132,6 +131,9 @@ def test_real_monster_event_names(match_payloads):
 def test_training_is_versioned_and_unchanged_runs_are_reused(tmp_path, match_payloads):
     pytest.importorskip("d3rlpy")
     workflow = prepare(tmp_path, match_payloads)
+    # Historical cache/retrain behavior remains supported for legacy artifacts.
+    # Corrected publication review is tested separately below.
+    workflow.config["features"] = FeatureConfig().to_dict()
     workflow.config["training"].update(n_steps=3, n_steps_per_epoch=2, batch_size=4)
     dataset = workflow.build()
     first = workflow.train(dataset)
@@ -140,6 +142,21 @@ def test_training_is_versioned_and_unchanged_runs_are_reused(tmp_path, match_pay
     assert first["report"]["optimizer_steps"] == 3  # No rounding down incomplete epochs.
     second = workflow.train(dataset, force=True)
     assert second["path"] != first["path"]
+
+
+def test_corrected_workflow_blocks_unreviewed_training_before_optimizer(
+    tmp_path, match_payloads, monkeypatch
+):
+    workflow = prepare(tmp_path, match_payloads)
+    dataset = workflow.build()
+    before = workflow.state_path.read_bytes()
+    trainer = Mock()
+    monkeypatch.setattr("offline_rift.training.rl_agent.OfflineMacroTrainer", trainer)
+    with pytest.raises(ValueError, match="Label review is unfinished"):
+        workflow.train(dataset)
+    trainer.assert_not_called()
+    assert workflow.state_path.read_bytes() == before
+    assert not workflow.path("models").exists()
 
 
 def test_add_verified_player_collect_and_deduplicate_combined_corpus(tmp_path, match_payloads):
