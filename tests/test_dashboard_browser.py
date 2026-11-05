@@ -27,6 +27,8 @@ CHECKS = r"""
  try {
   await wait(()=>title()==='Choose your role.');
   choose('role','TOP');await wait(()=>title()==='Farm top lane');
+  check(document.getElementById('model-kind').textContent.includes(window.testAlgorithm==='iql'?'IQL':window.testAlgorithm==='cql'?'CQL':'imitation'),'Algorithm is identified');
+  check(document.getElementById('score-label').textContent==={cql:'Q-VALUE',iql:'POLICY SCORE',bc:'BEHAVIOR SCORE'}[window.testAlgorithm],'Score meaning matches the algorithm');
   check(!document.getElementById('decision-check').hidden,'Action checks visible');
   check(document.getElementById('decision-horizon').textContent.includes('60'),'Action horizon visible');
   check(document.querySelectorAll('.action-row').length===15,'Full action catalog');
@@ -71,7 +73,7 @@ CHECKS = r"""
 
 @pytest.mark.skipif(not BROWSER, reason="Set RIFT_TEST_BROWSER to an installed Chromium executable")
 @pytest.mark.parametrize("width,height", [(1365, 1050), (390, 844)])
-@pytest.mark.parametrize("algorithm", ["cql", "bc"])
+@pytest.mark.parametrize("algorithm", ["cql", "bc", "iql"])
 def test_next_action_ui_subject_role_and_stale_states(tmp_path, width, height, algorithm):
     def state(*, team=None, actor=None, role=None):
         team = team or 100
@@ -143,7 +145,8 @@ def test_next_action_ui_subject_role_and_stale_states(tmp_path, width, height, a
 
     with DashboardServer(SimpleNamespace(state=state), 0) as server:
         source, mime = server.assets["/app.js"]
-        server.assets["/app.js"] = (source + CHECKS.encode(), mime)
+        script = f"window.testAlgorithm={json.dumps(algorithm)};\n" + CHECKS
+        server.assets["/app.js"] = (source + script.encode(), mime)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:

@@ -5,7 +5,7 @@ import pytest
 from rift_common.dataset import DatasetBuilder, load_dataset
 
 
-@pytest.mark.parametrize("algorithm", ["cql", "bc"])
+@pytest.mark.parametrize("algorithm", ["cql", "bc", "iql"])
 def test_real_optimizer_reload_serving_parity_and_immutable_outputs(
     tmp_path, match_payloads, catalog, algorithm
 ):

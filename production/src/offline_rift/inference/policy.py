@@ -40,19 +40,21 @@ class NextActionPolicy:
         ):
             raise ValueError("Model contract mismatch")
         self.device = device
-        self.network = OptionNetwork(len(self.encoder.names)).to(device)
+        self.algorithm = self.metadata["algorithm"]
+        architecture = self.metadata.get("network_architecture", "shared_v1")
+        expected = "independent_actor_v1" if self.algorithm == "iql" else "shared_v1"
+        if self.algorithm not in {"cql", "bc", "iql"} or architecture != expected:
+            raise ValueError("Invalid model architecture contract")
+        self.network = OptionNetwork(
+            len(self.encoder.names), separate_actor=self.algorithm == "iql"
+        ).to(device)
         self.network.load_state_dict(
             torch.load(directory / "policy.pt", map_location=device, weights_only=True)
         )
         self.network.eval()
         self.config = self.metadata["train_config"]
         self.counts = np.asarray(self.metadata["training_report"]["counts_by_group"])
-        self.algorithm = self.metadata["algorithm"]
-        if (
-            self.algorithm not in {"cql", "bc"}
-            or self.counts.shape != (7, len(Action))
-            or np.any(self.counts < 0)
-        ):
+        if self.counts.shape != (7, len(Action)) or np.any(self.counts < 0):
             raise ValueError("Invalid model support contract")
 
     def predict_batch(self, observations, groups, masks):
@@ -131,6 +133,8 @@ class NextActionPolicy:
             "scores": [float(v) if np.isfinite(v) else None for v in scores[0]],
             "score_meaning": "discounted return estimate; not a win probability"
             if self.algorithm == "cql"
+            else "advantage-weighted policy logit; not a win probability"
+            if self.algorithm == "iql"
             else "behavior-support logit; not a win probability",
             "method": self.algorithm,
             "partial_observation": True,

@@ -189,7 +189,7 @@ class Workflow:
         old = latest.get("model", {})
         from rift_common import network
 
-        from offline_rift.training import trainer
+        from offline_rift.training import iql, trainer
 
         signature = hashlib.sha256(
             json.dumps(
@@ -198,6 +198,8 @@ class Workflow:
         )
         for module in (network, trainer):
             signature.update(Path(module.__file__).read_bytes())
+        if config.algorithm == "iql":
+            signature.update(Path(iql.__file__).read_bytes())
         fingerprint = signature.hexdigest()
         if (
             not force
@@ -264,7 +266,7 @@ def main():
     sub.add_parser("build", help="Build explicit actor/role next-action transitions from cache")
     for command in ("train", "run"):
         child = sub.add_parser(command, help="Build and train an experimental next-action policy")
-        child.add_argument("--algorithm", choices=("cql", "bc"))
+        child.add_argument("--algorithm", choices=("cql", "bc", "iql"))
         child.add_argument("--steps", type=int)
         child.add_argument("--retrain", action="store_true")
     for command in ("ui", "live"):

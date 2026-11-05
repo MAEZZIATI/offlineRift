@@ -7,17 +7,23 @@ from rift_common.actions import Action
 
 
 class OptionNetwork(nn.Module):
-    def __init__(self, size):
+    def __init__(self, size, *, separate_actor=False):
         super().__init__()
         self.encoder = nn.Sequential(
             nn.Linear(size, 128), nn.ReLU(), nn.Linear(128, 128), nn.ReLU()
         )
         self.value = nn.Linear(128, len(Action))
         self.behavior = nn.Linear(128, len(Action))
+        self.actor_encoder = (
+            nn.Sequential(nn.Linear(size, 128), nn.ReLU(), nn.Linear(128, 128), nn.ReLU())
+            if separate_actor
+            else None
+        )
 
     def forward(self, observations):
         context = self.encoder(observations)
-        return self.value(context), self.behavior(context)
+        actor = self.actor_encoder(observations) if self.actor_encoder is not None else context
+        return self.value(context), self.behavior(actor)
 
 
 def action_support(counts, groups, masks, minimum=20):
@@ -36,6 +42,8 @@ def rank_options(
 ):
     import numpy as np
 
+    if algorithm not in {"cql", "bc", "iql"}:
+        raise ValueError("Unknown policy algorithm")
     allowed = action_support(
         np.asarray(counts), np.asarray(groups), np.asarray(masks), minimum_support
     )

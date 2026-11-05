@@ -78,6 +78,33 @@ history/health/structure fields to represent incomplete live observations. Accel
 memory scales with batches; NPZ corpora are still loaded in memory. No distributed or
 out-of-core scale claim is made.
 
+## Discrete implicit Q-learning comparison
+
+The optional `iql` algorithm fits two independent action critics and a scalar state value.
+The value minimizes asymmetric squared error against the minimum target critic on the
+**recorded action**, with expectile 0.7 by default. Critic targets are terminal rewards
+plus the same elapsed-time-discounted next-state value. Terminal rows never bootstrap.
+Target critics move toward online weights with a Polyak coefficient of 0.005 each update.
+
+A separate categorical actor minimizes masked negative log likelihood of the recorded
+action weighted by `exp(3 * (min(Q_target) - V))`, capped at 100. Actor and critic encoders
+have independent parameters. Unlike the CQL/BC support auxiliary objective, this actor
+uses no class balancing: reweighting actions again would change the IQL extraction loss.
+Optional observation masking, action feasibility, grouped splits and terminal rewards
+remain identical across the comparison. This is a discrete adaptation, not a replication
+of continuous-control benchmark results in the [IQL paper](https://arxiv.org/abs/2110.06169).
+
+IQL inference ranks categorical actor logits within the same observed role/action counts
+and feasibility masks. `behavior_floor` applies to the advantage-weighted actor's masked
+mass; that mass is **not** an independently calibrated behavior probability or a win
+probability. No critic/actor score blending occurs. The UI identifies IQL and labels its
+scores as policy scores. The extra training networks are not needed for inference.
+
+The study runner fixes `split_seed=42` independently of optimizer seeds. All eligible
+cached matches participate in either training or development; training on the development
+rows would invalidate this comparison. Results are exploratory because these cached games
+have been consulted previously. No model is automatically promoted by the study runner.
+
 ## Evaluation and deployment boundaries
 
 All actors and both teams from each match share a split. Reports include action support,

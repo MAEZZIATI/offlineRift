@@ -17,7 +17,7 @@ team formation. Improved live win rate and optimal play have not been establishe
 
 Production never imports research. Common imports neither application. Research is an
 optional package excluded from the production wheel. There is one maintained workflow
-and one policy network; there is no formation-classifier or classifier/Q-score blend.
+and serving contract; there is no formation-classifier or classifier/Q-score blend.
 
 ## Install
 
@@ -30,6 +30,8 @@ uv pip install --python .venv/bin/python -e '.[train,dev]' -e ./research
 Training and inference use Torch. The small discrete CQL implementation directly uses
 stored next states, elapsed-time discounting and action masks; it does not need d3rlpy.
 The `bc` algorithm is an imitation baseline for comparisons, not the RL default.
+The optional `iql` algorithm uses discrete implicit Q-learning with a separate categorical
+actor, twin critics and expectile value learning through the same maintained trainer.
 
 ## Collect, build and train
 
@@ -92,10 +94,15 @@ and does not record sessions. Restart its command after updating browser assets.
 .venv/bin/rift-research dataset --dataset /path/to/transitions.npz
 .venv/bin/rift-research evaluate --dataset /path/to/transitions.npz \
   --bundle /path/to/policy --output /path/to/new/evaluation
+# Matched-split experiments across all eligible cached data (12 runs):
+.venv/bin/rift-research study --config workflow.json \
+  --output data/research/next-actions-study --steps 10000 --seeds 42 43
 ```
 
 See [the modeling contract](docs/MODELING.md), [action catalog](docs/ACTIONS.md),
 [architecture](docs/ARCHITECTURE.md) and [new research protocol](research/README.md) and [initial observed study](research/docs/INITIAL_STUDY.md).
+The [matched CQL/IQL/BC study](research/docs/POLICY_COMPARISON_20261105.md) records twelve
+further runs and their concentration and missing-history limits.
 Actions are reconstructed from observed behavior, not logged player commands or known
 intent. State history is causal. Live coordinates, vision, waves, camp availability and
 cast history are not invented. Both teams and all players from a match stay together in
@@ -107,6 +114,12 @@ The former objective's source, research documents and local configuration were a
 under `data/archive/` and removed from maintained code. Old datasets/models remain stored
 but are intentionally rejected by the new schema. New latest references live under
 `data/projects/<name>/next-actions/`, separate from the old model pointer.
+
+Legacy experiment outputs, datasets and model directories were also moved into a
+checksummed archive. `data/archive/legacy-artifacts-latest.json` identifies its manifest,
+which records original paths and SHA-256 hashes. Raw matches, patch catalogs and active
+next-action artifacts remain in their configured locations. Historical reports retain
+their original path strings; use the archive manifest to locate moved artifacts.
 
 ## Validation
 

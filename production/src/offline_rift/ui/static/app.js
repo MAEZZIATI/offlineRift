@@ -81,7 +81,7 @@ function updateActors(data) {
 
 function percentage(value) { return Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : "Not recorded"; }
 function renderModel(model) {
-  $("model-kind").textContent = model.prediction_method === "cql" ? "Offline RL · CQL" : "Behavior imitation baseline";
+  $("model-kind").textContent = { cql: "Offline RL · CQL", iql: "Offline RL · IQL", bc: "Behavior imitation baseline" }[model.prediction_method] || "Unknown policy";
   $("model-kind").title = model.name || "";
   const counts = model.action_counts || [];
   $("coverage").textContent = `${model.action_coverage} / ${Object.keys(latest.actions).length} actions`;
@@ -135,7 +135,7 @@ function render() {
     $("decision-horizon").textContent = `Next ~${result.horizon_seconds}s · Reassess when the situation changes`; $("decision-horizon").hidden = false;
     $("decision-tag").textContent = result.status === "respawning" ? "RESPAWNING" : "POLICY ESTIMATE";
     $("decision-kicker").textContent = "NEXT ACTION · CHECK AGAINST YOUR MAP";
-    $("score-label").textContent = result.method === "cql" ? "Q-VALUE" : "BEHAVIOR SCORE";
+    $("score-label").textContent = result.method === "cql" ? "Q-VALUE" : result.method === "iql" ? "POLICY SCORE" : "BEHAVIOR SCORE";
     $("score-note").textContent = result.score_meaning;
     for (const row of $("action-list").children) {
       const id = Number(row.dataset.action); const selected = id === result.action_id;

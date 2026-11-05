@@ -1,4 +1,4 @@
-"""Explicit-transition discrete CQL with a behavior-support head and elapsed-time discount."""
+"""Explicit-transition CQL, discrete IQL and imitation with measured-time discount."""
 
 import copy
 from dataclasses import asdict, dataclass
@@ -24,15 +24,20 @@ class TrainConfig:
     alpha: float = 0.1
     gamma: float = 0.99
     seed: int = 42
+    split_seed: int | None = None
     validation_fraction: float = 0.2
     minimum_support: int = 20
     behavior_floor: float = 0.02
     cpu_threads: int = 2
     device: str = "cpu"
+    expectile: float = 0.7
+    advantage_temperature: float = 3.0
+    advantage_clip: float = 100.0
+    target_tau: float = 0.005
 
     def __post_init__(self):
         if (
-            self.algorithm not in {"cql", "bc"}
+            self.algorithm not in {"cql", "bc", "iql"}
             or self.steps < 1
             or self.batch_size < 1
             or self.cpu_threads < 1
@@ -42,6 +47,10 @@ class TrainConfig:
             or not 0 < self.validation_fraction < 1
             or self.minimum_support < 1
             or not 0 <= self.behavior_floor < 1
+            or not 0 < self.expectile < 1
+            or self.advantage_temperature <= 0
+            or self.advantage_clip < 1
+            or not 0 < self.target_tau <= 1
         ):
             raise ValueError("Invalid training configuration")
 
@@ -81,7 +90,13 @@ class PolicyTrainer:
         if len(matches) < 2:
             raise ValueError("At least two independent matches are required")
         rng = np.random.default_rng(config.seed)
-        rng.shuffle(matches)
+        split_rng = np.random.default_rng(
+            config.seed if config.split_seed is None else config.split_seed
+        )
+        split_rng.shuffle(matches)
+        # Preserve prior sampling when the split follows the optimizer seed.
+        if config.split_seed is None:
+            rng = split_rng
         count = max(1, int(len(matches) * config.validation_fraction))
         validation = np.isin(arrays["match_ids"], matches[:count])
         rows = np.flatnonzero(~validation)
@@ -102,11 +117,20 @@ class PolicyTrainer:
                 "network": file_digest(network_contract.__file__),
             },
         }
+        if config.algorithm == "iql":
+            run["source_sha256"]["iql"] = file_digest(Path(__file__).with_name("iql.py"))
         atomic_json(output / "run.json", run)
         try:
             torch.set_num_threads(config.cpu_threads)
             torch.manual_seed(config.seed)
-            network = OptionNetwork(arrays["observations"].shape[1]).to(config.device)
+            network = OptionNetwork(
+                arrays["observations"].shape[1], separate_actor=config.algorithm == "iql"
+            ).to(config.device)
+            implicit = None
+            if config.algorithm == "iql":
+                from offline_rift.training.iql import IQLUpdate
+
+                implicit = IQLUpdate(network, config)
             target = copy.deepcopy(network).eval()
             optimizer = torch.optim.AdamW(
                 network.parameters(), lr=config.learning_rate, weight_decay=1e-4
@@ -156,6 +180,11 @@ class PolicyTrainer:
                 batch = {key: value[chosen].to(config.device) for key, value in tensors.items()}
                 batch["observations"] = mask_optional(batch["observations"])
                 batch["next_observations"] = mask_optional(batch["next_observations"])
+                if implicit is not None:
+                    last = {"step": step, **implicit.step(batch)}
+                    if step % 1000 == 0 or step == config.steps:
+                        atomic_json(output / "progress.json", last)
+                    continue
                 q, logits = network(batch["observations"])
                 observed = q.gather(1, batch["actions"][:, None]).squeeze(1)
                 bc_loss = F.cross_entropy(
@@ -245,7 +274,7 @@ class PolicyTrainer:
                 },
                 "last_optimizer": last,
                 "observed_action_q_mean": float(values[np.arange(len(truth)), truth].mean())
-                if config.algorithm == "cql"
+                if config.algorithm in {"cql", "iql"}
                 else None,
                 "limitations": [
                     "Inferred executed options, not logged commands or proven intent",
@@ -259,6 +288,9 @@ class PolicyTrainer:
             metadata.update(
                 bundle_schema="next-action-policy-v1",
                 algorithm=config.algorithm,
+                network_architecture="independent_actor_v1"
+                if config.algorithm == "iql"
+                else "shared_v1",
                 train_config=asdict(config),
                 training_report=report,
             )
@@ -283,7 +315,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--algorithm", choices=("cql", "bc"), default="cql")
+    parser.add_argument("--algorithm", choices=("cql", "bc", "iql"), default="cql")
     parser.add_argument("--steps", type=int, default=10000)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--seed", type=int, default=42)

@@ -83,6 +83,30 @@ def evaluate_policy(dataset, bundle, output, *, samples=500):
         "algorithm": policy.algorithm,
         "validation_matches": sorted(validation),
         "metrics": metrics,
+        "per_group": {
+            group: {
+                **behavior_metrics(
+                    truth[arrays["groups"][mask] == i],
+                    predicted[arrays["groups"][mask] == i],
+                    len(ACTION_NAMES),
+                ),
+                "largest_prediction_fraction": float(
+                    np.bincount(
+                        predicted[(arrays["groups"][mask] == i) & (predicted >= 0)],
+                        minlength=len(ACTION_NAMES),
+                    ).max()
+                    / max(1, np.sum((arrays["groups"][mask] == i) & (predicted >= 0)))
+                ),
+            }
+            for i, group in enumerate(GROUPS)
+            if np.any(arrays["groups"][mask] == i)
+        },
+        "score_quantiles": np.quantile(
+            scores[np.isfinite(scores)], [0, 0.01, 0.5, 0.99, 1]
+        ).tolist()
+        if np.isfinite(scores).any()
+        else [],
+        "score_meaning": "Q estimate" if policy.algorithm == "cql" else "policy logit",
         "behavior_macro_f1_match_bootstrap_95": np.quantile(estimates, [0.025, 0.975]).tolist(),
         "bootstrap_samples": samples,
         "policy_winrate": None,

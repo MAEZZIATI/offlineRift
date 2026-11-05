@@ -5,6 +5,9 @@ next behaviors toward winning. Formation classification is no longer the objecti
 Previous source and research records are archived locally under `data/archive/`; they
 are not evidence for this new action contract or new policies.
 
+See the [matched CQL/IQL/BC comparison](docs/POLICY_COMPARISON_20261105.md) for twelve
+completed runs, seed and missing-history diagnostics, action replays and the cleanup audit.
+
 ## Initial study
 
 1. Reconstruct behavior from **real adjacent frames**, with future evidence restricted
@@ -44,9 +47,30 @@ are not evidence for this new action contract or new policies.
 rift-research dataset --dataset /path/to/transitions.npz
 rift-research evaluate --dataset /path/to/transitions.npz \
   --bundle /path/to/policy --output /path/to/new/evaluation
+rift-research study --config workflow.json --output data/research/next-actions-study \
+  --steps 10000 --seeds 42 43
+rift-research sensitivity --study data/research/next-actions-study \
+  --output data/research/next-actions-study-sensitivity
 ```
 
 Evaluation reproduces serving predictions on the saved match split and reports a
 match-cluster bootstrap for behavior diagnostics. `policy_winrate` and
 `policy_improvement` remain unset. Initial retrospective development uses already
 consulted cached matches; it is not an untouched confirmatory test.
+
+The maintained study runner calls the existing workflow builder, trainer and frozen
+evaluator. It compares BC, CQL alpha 0.03/0.1/0.3 and discrete IQL expectile 0.7/0.9,
+each with two optimizer seeds and one fixed match split. Every completed run is reloaded
+through serving, with behavior metrics, per-role concentration, score quantiles and
+match-cluster bootstrap intervals persisted atomically. Failed/interrupted study reports
+and partial runs remain stored. It never updates the latest model reference. The
+[IQL paper](https://arxiv.org/abs/2110.06169) and
+[author implementation](https://github.com/ikostrikov/implicit_q_learning) motivate the
+recorded-action expectile backup and advantage-weighted actor. Discrete masks and
+elapsed-time targets adapt those ideas to this observation contract.
+
+Sensitivity analysis requires a completed study and checks the exact dataset digest. It
+reports agreement across optimizer seeds, recorded-action critic ranges and prediction
+changes when health or cold-start history is masked. Masks represent missing evidence;
+they do not invent observations or alter target outcomes. These controlled omissions
+do not measure the actual live input distribution or policy usefulness.

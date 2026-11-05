@@ -5,7 +5,8 @@ production/src/offline_rift/
   collection.py          Riot regional client, retries and raw collection
   catalogs.py            Exact-patch item catalogs
   workflow.py            One collect/build/train/use orchestration path
-  training/trainer.py    Explicit discrete CQL and an imitation baseline
+  training/trainer.py    Shared training path for CQL, IQL and imitation
+  training/iql.py        Discrete expectile/twin-critic/actor updates
   inference/policy.py    Weights-only runtime and supported action ranking
   inference/live_client.py  Live adaptation, history and subject selection
   inference/transport.py    Bounded local / Windows loopback transport
@@ -24,6 +25,7 @@ common/src/rift_common/
 research/src/rift_research/
   evaluation.py          Dataset audits and frozen-policy diagnostics
   cli.py                 Optional research entry point
+  experiments.py         Matched-split studies using the maintained builder/trainer
 research/README.md        New-objective study protocol
 research/docs/            Specific observed runs
 tests/                  All tests in one folder
@@ -44,3 +46,8 @@ Bundles contain `policy.pt`, `metadata.json`, `bundle.json` and `run.json`. The 
 checks next-action schema, exact feature/action names and hashes before weights-only
 Torch loading. Checksums detect corruption, not publisher authenticity. Legacy formation
 bundles are rejected rather than silently reinterpreted.
+
+IQL bundles explicitly identify the `independent_actor_v1` architecture; existing CQL/BC
+bundles retain `shared_v1`. Runtime loads only the categorical actor and first critic.
+The second critic and expectile value network are training-only. Policy loading remains
+independent of the training package.
