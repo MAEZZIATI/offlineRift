@@ -80,7 +80,7 @@ class LiveDataSource:
             raise LiveClientUnavailable(
                 f"Live Client unavailable via {self.transport} transport. "
                 "Start a 5v5 Summoner's Rift match and wait for the map to load. "
-                "For Windows + WSL, check curl.exe and Windows interop; see docs/EXECUTION.md."
+                "For Windows + WSL, check curl.exe and Windows interop; see README.md."
             ) from None
 
     def _windows_fetch(self):

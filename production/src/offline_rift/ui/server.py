@@ -9,7 +9,7 @@ import math
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from offline_rift.inference.transport import TRANSPORTS
 from offline_rift.ui.service import LiveDashboard
@@ -56,7 +56,22 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         route = urlsplit(self.path).path
         if route == "/api/state":
-            payload = json.dumps(self.server.dashboard.state(), allow_nan=False).encode()
+            query = parse_qs(urlsplit(self.path).query)
+            if set(query) - {"team", "actor", "role"} or any(
+                len(values) != 1 for values in query.values()
+            ):
+                self.send_error(400)
+                return
+            try:
+                team = int(query["team"][0]) if "team" in query else None
+                actor = query.get("actor", [None])[0]
+                role = query.get("role", [None])[0]
+                payload = json.dumps(
+                    self.server.dashboard.state(team=team, actor=actor, role=role), allow_nan=False
+                ).encode()
+            except (ValueError, KeyError):
+                self.send_error(400)
+                return
             self._send(payload, "application/json; charset=utf-8")
         elif route in self.server.assets:
             self._send(*self.server.assets[route])
@@ -87,12 +102,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
 
 def add_ui_arguments(parser: argparse.ArgumentParser):
+    from rift_common.actions import ROLES
+
     parser.add_argument("--team", type=int, choices=(100, 200), default=100)
+    parser.add_argument("--actor", default="active")
+    parser.add_argument("--role", choices=ROLES)
     parser.add_argument(
         "--interval",
         type=float,
-        default=30,
-        help="Poll interval in seconds (default: 30, minimum: 2)",
+        default=10,
+        help="Poll interval in seconds (default: 10, minimum: 2)",
     )
     parser.add_argument(
         "--port", type=int, default=8765, help="Local dashboard port (default: 8765)"
@@ -107,7 +126,15 @@ def add_ui_arguments(parser: argparse.ArgumentParser):
 
 
 def run_ui(
-    model_dir: str | Path, *, team=100, interval=30, port=8765, transport="auto", ca_bundle=None
+    model_dir: str | Path,
+    *,
+    team=100,
+    actor="active",
+    role=None,
+    interval=10,
+    port=8765,
+    transport="auto",
+    ca_bundle=None,
 ):
     if not 1 <= port <= 65535:
         raise ValueError("UI port must be between 1 and 65535")
@@ -122,6 +149,8 @@ def run_ui(
     client = LiveClientInference(
         model_dir,
         team=team,
+        actor=actor,
+        role=role,
         interval_seconds=interval,
         transport=transport,
         verify_tls=ca_bundle or False,
@@ -150,6 +179,8 @@ def main():
         run_ui(
             args.model,
             team=args.team,
+            actor=args.actor,
+            role=args.role,
             interval=args.interval,
             port=args.port,
             transport=args.transport,

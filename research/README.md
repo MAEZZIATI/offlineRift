@@ -1,39 +1,52 @@
-# Optional research workspace
+# Next-action policy research
 
-Experiments, labeling and papers live here; production does not import this package.
-All tests remain in the repository's top-level `tests/` directory.
+The objective is a player/role- or team-conditioned policy that recommends executable
+next behaviors toward winning. Formation classification is no longer the objective.
+Previous source and research records are archived locally under `data/archive/`; they
+are not evidence for this new action contract or new policies.
 
-Install alongside the production/common distribution:
+## Initial study
+
+1. Reconstruct behavior from **real adjacent frames**, with future evidence restricted
+   to action/reward/next-state targets. Keep all ten players and both teams grouped.
+2. Audit which inferred options are supported, durations, role/action balance, unknown
+   episodes and patch coverage. Inspect evidence at action boundaries, especially combat,
+   base arrival, lane/jungle classification and objective approaches.
+3. Fit CQL with terminal team win/loss rewards and elapsed-time discount. Fit imitation
+   on the identical match split as a baseline. Do not select solely on behavior agreement.
+4. Record role-specific concentration, unsupported-state abstentions, value stability,
+   action coverage and sensitivity to conservative/support settings. No Q-to-win conversion.
+5. Test connection, subject/role selection and availability masks in a real game. Capture
+   opt-in sessions only through a separately designed recording feature; the dashboard
+   currently records nothing.
+6. Design a later prospective outcome study with predefined eligibility, adherence,
+   comparison, sample size and stopping rules before claiming a win-rate improvement.
+
+## Open modeling questions
+
+- Do inferred choices correspond to meaningful interventions, rather than incidental
+  movement, forced reactions or overlapping activities in a minute-long interval?
+- How should failed/ambushed combat be represented without conditioning labels on success?
+- Does shared team reward identify useful individual choices under hidden positioning,
+  teammate policies and selection bias? Current data do not establish that assumption.
+- When can finer temporal events justify shorter option boundaries? How should a current
+  activity terminate? Do not fabricate telemetry between frames.
+- Does causal history improve actionable value estimates over the same current features?
+- Can audited gank attempts, siege/defense, Grubs and wave decisions be added with reliable
+  evidence and compatible live observations? See [the action catalog](../docs/ACTIONS.md).
+- How should uncertainty/abstention thresholds be calibrated on a separate split?
+- Which off-policy estimators are defensible under the observed support and confounding?
+  An offline value score is not automatically a trustworthy counterfactual evaluation.
+
+## Commands
 
 ```bash
-uv pip install --python .venv/bin/python -e '.[train,dev]' -e ./research
-.venv/bin/rift-research --help
+rift-research dataset --dataset /path/to/transitions.npz
+rift-research evaluate --dataset /path/to/transitions.npz \
+  --bundle /path/to/policy --output /path/to/new/evaluation
 ```
 
-Use `compare` for frozen serving bundles, `evaluate` for CQL/BC/hybrid ablations,
-`memory` for causal-history experiments, `cohort` for explicitly configured collection
-studies, and `audit` / `review` for independent labeling. Labeling is currently deferred.
-These commands write new experiment directories; they do not publish an active model.
-
-```bash
-.venv/bin/rift-research compare \
-  --dataset /path/to/development/transitions.npz \
-  --bundles /path/to/reference /path/to/candidate \
-  --output /path/to/new/comparison
-```
-
-Comparisons require identical training label counts and evaluation matches. Reports
-include per-action metrics, majority baseline, coverage/collapse checks, paired
-match-bootstrap intervals, model hashes and local CPU serving latency. `--unseen`
-excludes every model's saved training/development matches and requires equal evaluation
-masks across models. It does not make a previously consulted cohort an untouched test.
-
-The maintained trainers belong to `production/`; reusable features, model components,
-metrics, splits and artifact handling belong to `common/`. Add experimental algorithms
-here until their behavior and runtime contract are ready for deliberate production use.
-
-Historical records: [synthesis](docs/RESEARCH_SYNTHESIS.md), [objective rules and label review](docs/OBJECTIVE_RULES.md),
-[data plan](docs/DATA_PLAN.md), [model directions](docs/MODEL_IMPROVEMENTS.md),
-[memory study](docs/MEMORY_STUDY.md), [original results](docs/RESULTS.md), and
-[V2 results](docs/RESULTS_V2.md). Local datasets/weights remain outside Git under
-`data/research/` and `models/`.
+Evaluation reproduces serving predictions on the saved match split and reports a
+match-cluster bootstrap for behavior diagnostics. `policy_winrate` and
+`policy_improvement` remain unset. Initial retrospective development uses already
+consulted cached matches; it is not an untouched confirmatory test.

@@ -40,16 +40,23 @@
         <span class="experiment-label"><span aria-hidden="true">◇</span> Experimental</span>
       </section>
 
+      <section class="actor-controls" aria-label="Decision subject">
+        <label for="actor"><span class="eyebrow">ADVICE FOR</span><select id="actor"><option value="active">Me · identify from game</option><option value="team">Selected team</option></select></label>
+        <label for="role"><span class="eyebrow">PLAYER ROLE</span><select id="role"><option value="">Use reported role</option><option value="TOP">Top</option><option value="JUNGLE">Jungle</option><option value="MIDDLE">Mid</option><option value="BOTTOM">Bottom / ADC</option><option value="UTILITY">Support</option></select></label>
+        <p id="actor-hint">Select your player and role for individual decisions, or choose the team view.</p>
+      </section>
       <aside id="model-warning" class="notice" hidden><span aria-hidden="true">!</span><p id="model-warning-text"></p></aside>
 
       <div class="dashboard">
         <section class="decision panel" aria-labelledby="decision-title">
-          <div class="panel-top"><h2 class="eyebrow">MODEL SUGGESTION</h2><span class="tag" id="decision-tag">WAITING</span></div>
+          <div class="panel-top"><h2 class="eyebrow">SUGGESTED NEXT ACTION</h2><span class="tag" id="decision-tag">WAITING</span></div>
           <div class="decision-body" role="status" aria-live="polite" aria-atomic="true">
             <svg class="decision-emblem" width="64" height="64" viewBox="0 0 64 64" fill="none" aria-hidden="true"><path class="emblem-frame" d="M32 3 56 17v30L32 61 8 47V17Z"/><path d="m32 17 10 15-10 15-10-15Z"/><path d="M32 8v5m0 38v5M13 21l5 3m28 16 5 3M13 43l5-3m28-16 5-3"/></svg>
             <p class="decision-kicker" id="decision-kicker">READY WHEN YOU ARE</p>
             <h3 id="decision-title">Waiting for your game.</h3>
             <p id="decision-description">Start a 5v5 Summoner’s Rift match. Your model will connect when the map has loaded.</p>
+            <p id="decision-check" class="decision-check" hidden></p>
+            <p id="decision-horizon" class="decision-horizon" hidden></p>
           </div>
           <div class="decision-footer"><span class="perspective"><i class="team-dot blue" id="perspective-dot" aria-hidden="true"></i><span id="perspective">Blue team perspective</span></span><span id="decision-time">No observation yet</span></div>
         </section>
@@ -67,23 +74,23 @@
         </aside>
 
         <section class="options panel secondary" aria-labelledby="options-title">
-          <div class="panel-top"><h2 id="options-title">Other patterns to consider</h2><span class="muted small">MODEL RANKING</span></div>
+          <div class="panel-top"><h2 id="options-title">Other supported actions</h2><span class="muted small">POLICY RANKING</span></div>
           <p class="section-note">Alternatives from the same observation. Check the map before acting.</p>
-          <ol class="alternatives" id="alternatives"><li class="empty-options">Options appear when a game connects.</li></ol>
-          <details class="all-options"><summary>All 12 patterns &amp; scores</summary><div class="score-heading"><span>PATTERN</span><span id="score-label">MODEL SCORE</span></div><ol class="action-list" id="action-list"></ol><p id="score-note" class="values-note">Scores rank formation patterns. They are not probabilities or calibrated confidence.</p></details>
+          <ol class="alternatives" id="alternatives"><li class="empty-options">Supported actions appear when a game connects.</li></ol>
+          <details class="all-options"><summary>All actions &amp; scores</summary><div class="score-heading"><span>ACTION</span><span id="score-label">MODEL SCORE</span></div><ol class="action-list" id="action-list"></ol><p id="score-note" class="values-note">Scores rank next actions. They are not win probabilities.</p></details>
         </section>
 
         <section class="context panel secondary" aria-labelledby="context-title">
           <div class="panel-top"><h2 id="context-title">Keep the map in mind.</h2></div>
           <p class="context-intro">A second perspective, with a partial view.</p>
-          <div class="context-group"><h3><span class="context-indicator observed" aria-hidden="true"></span>What the model can use</h3><p>Game time · Levels &amp; inventory<br>Estimated objective state</p></div>
-          <div class="context-group"><h3><span class="context-indicator unavailable" aria-hidden="true"></span>What you need to check</h3><p>Player positions · Waves &amp; vision<br>Team readiness · Ability cooldowns</p></div>
-          <p class="context-footnote" id="observation">The model describes formation patterns. It does not establish which play will succeed.</p>
+          <div class="context-group"><h3><span class="context-indicator observed" aria-hidden="true"></span>What the model can use</h3><p>Your role · Levels &amp; inventory<br>Recent public history · Objective estimates</p></div>
+          <div class="context-group"><h3><span class="context-indicator unavailable" aria-hidden="true"></span>What you need to check</h3><p>Player positions · Waves &amp; vision<br>Camp availability · Ability cooldowns</p></div>
+          <p class="context-footnote" id="observation">The policy estimates next-action values from recorded games. Winning more often has not yet been tested.</p>
         </section>
       </div>
 
       <details class="model-details secondary" id="model-details"><summary><span>Model performance &amp; limitations</span><span class="summary-hint">HOW TO READ THIS</span></summary>
-        <div class="model-detail-content"><dl class="model-facts"><div><dt>Training coverage</dt><dd id="coverage">—</dd></div><div><dt>Label agreement</dt><dd id="agreement">—</dd></div><div><dt>Majority baseline</dt><dd id="baseline">—</dd></div><div><dt>Balanced accuracy</dt><dd id="balanced-accuracy">—</dd></div><div><dt>Macro F1</dt><dd id="macro-f1">—</dd></div></dl><div class="model-explanation"><p>These metrics measure agreement with weak formation labels, not strategic quality or win-rate improvement. Objective timings are estimates.</p><p id="distribution"></p><p id="predictions"></p></div></div>
+        <div class="model-detail-content"><dl class="model-facts"><div><dt>Training coverage</dt><dd id="coverage">—</dd></div><div><dt>Behavior agreement</dt><dd id="agreement">—</dd></div><div><dt>Majority baseline</dt><dd id="baseline">—</dd></div><div><dt>Balanced accuracy</dt><dd id="balanced-accuracy">—</dd></div><div><dt>Macro F1</dt><dd id="macro-f1">—</dd></div></dl><div class="model-explanation"><p>These metrics diagnose reconstructed behaviors and action support. They do not estimate policy win rate or prove improvement. Objective timings are estimates.</p><p id="distribution"></p><p id="predictions"></p></div></div>
       </details>
       <p class="focus-note" hidden id="focus-note">Focus view is on. Press <kbd>F</kbd> or use the button above to show the full overview.</p>
     </main>

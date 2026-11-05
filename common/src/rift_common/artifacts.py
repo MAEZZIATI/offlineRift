@@ -41,15 +41,13 @@ def write_bundle_manifest(directory, filenames):
     )
 
 
-def verify_bundle_manifest(directory, *, required=False):
+def verify_bundle_manifest(directory):
     directory = Path(directory)
     path = directory / "bundle.json"
-    if not path.exists() and not required:
-        return
     manifest = read_json(path)
     if manifest.get("version") != 1 or not manifest.get("sha256"):
         raise ValueError("Invalid model bundle manifest")
-    expected = {"metadata.json", "macro_predictor.pt"}
+    expected = {"metadata.json", "policy.pt"}
     if not expected <= manifest["sha256"].keys():
         raise ValueError("Model bundle manifest is incomplete")
     for name, digest in manifest["sha256"].items():

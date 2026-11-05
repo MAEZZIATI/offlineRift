@@ -1,4 +1,4 @@
-"""Compatibility launcher for the documented ``python workflow.py`` command."""
+"""Compatibility launcher for the single supported workflow."""
 
 from offline_rift.workflow import main
 

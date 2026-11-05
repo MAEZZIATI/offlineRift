@@ -1,18 +1,15 @@
-from __future__ import annotations
-
 import json
 import threading
-from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from unittest.mock import Mock
 from urllib.error import HTTPError
 from urllib.request import ProxyHandler, Request, build_opener
 
 import pytest
-from offline_rift.inference.live_client import LiveClientUnavailable
-from offline_rift.ui.server import DashboardServer, run_ui
+from offline_rift.inference.live_client import LiveClientUnavailable, LiveStateAdapter
+from offline_rift.ui.server import DashboardServer
 from offline_rift.ui.service import LiveDashboard
-from rift_common.pipeline.actions import ACTION_NAMES, ACTION_SCHEMA
+from test_live import live_data
 
 
 @pytest.fixture
@@ -22,127 +19,83 @@ def dashboard(monkeypatch):
         "offline_rift.ui.service.time",
         SimpleNamespace(monotonic=lambda: clock[0], time=lambda: 1000 + clock[0]),
     )
-    client = Mock(interval_seconds=30, team=100)
+    client = Mock(team=100, actor="active", role=None, interval_seconds=10)
+    client.source.transport = "local"
+    client.adapter = LiveStateAdapter()
+    client.fetch_live_data.return_value = live_data()
+    client.policy.name = "test-policy"
     client.policy.metadata = {
-        "action_schema": ACTION_SCHEMA,
-        "action_names": ACTION_NAMES,
+        "algorithm": "cql",
         "training_report": {
-            "validation_prediction_counts": [0] * 11 + [20],
-            "action_counts": [1, 1, 1, 1, 96] + [0] * 7,
-            "validation_heuristic_agreement": 0.85,
-            "validation_majority_baseline": 0.85,
+            "action_counts": [10] * 15,
+            "validation": {
+                "prediction_counts": [10] * 15,
+                "behavior_agreement": 0.2,
+                "balanced_accuracy": 0.2,
+                "macro_f1": 0.2,
+                "collapsed": False,
+            },
+            "majority_baseline": 0.3,
+            "per_group": {},
         },
     }
-    client.source.transport = "windows"
-    client.recommend.side_effect = lambda snapshot, team: {
-        "action_id": 11,
-        "action": "Unclassified / insufficient evidence",
+    client.recommend.side_effect = lambda snapshot, team, actor, role: {
+        "status": "recommendation",
+        "action_id": 0,
         "team": team,
-        "game_time": 120,
-        "q_values": [0.1] * 12,
+        "actor": actor,
+        "role": role,
+        "game_time": snapshot.time,
     }
     return LiveDashboard(client), clock
 
 
-def test_tabs_and_teams_share_one_snapshot_and_model_inference(dashboard):
+def test_subject_changes_share_snapshot_but_not_cached_advice(dashboard):
     service, clock = dashboard
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        states = list(pool.map(lambda _: service.state(), range(8)))
+    first = service.state(team=100, actor="team")
+    second = service.state(team=100, actor="Player1#TEST", role="TOP")
+    assert first["recommendation"]["actor"] == "team"
+    assert second["recommendation"]["role"] == "TOP"
     service.client.fetch_live_data.assert_called_once()
-    service.client.adapter.snapshot.assert_called_once()
     assert service.client.recommend.call_count == 2
-    assert states[0]["recommendations"]["100"]["team"] == 100
-    assert states[0]["recommendations"]["200"]["team"] == 200
-    assert states[0]["model"]["collapsed"] is True
-    assert states[0]["model"]["action_coverage"] == 5
-    assert states[0]["valid_for_ms"] == 30000
-    states[0]["recommendations"].clear()
-    assert service.state()["recommendations"]  # A caller cannot corrupt the cache.
-    clock[0] = 29
-    assert service.state()["valid_for_ms"] == 1000
-    assert service.client.fetch_live_data.call_count == 1
-
-
-@pytest.mark.parametrize(
-    "error,status",
-    [
-        (LiveClientUnavailable("no game"), "offline"),
-        (ValueError("bad map"), "invalid_state"),
-        (RuntimeError("failed model"), "error"),
-    ],
-)
-def test_expired_success_is_replaced_by_failure_then_recovers(dashboard, error, status):
-    service, clock = dashboard
-    assert service.state()["status"] == "live"
-    clock[0] = 31
-    service.client.fetch_live_data.side_effect = error
-    failed = service.state()
-    assert failed["status"] == status
-    assert failed["recommendations"] == {}
-    assert "action_id" not in failed
-    clock[0] = 62
+    second["recommendation"].clear()
+    assert service.state(team=100, actor="Player1#TEST", role="TOP")["recommendation"]
+    clock[0] = 11
+    service.client.fetch_live_data.side_effect = LiveClientUnavailable("no game")
+    failure = service.state()
+    assert failure["status"] == "offline" and "recommendation" not in failure
+    clock[0] = 22
     service.client.fetch_live_data.side_effect = None
     assert service.state()["status"] == "live"
-    service.close()
-    service.client.close.assert_called_once()
 
 
-def test_browser_assets_and_read_only_api_are_local(dashboard):
+def test_local_read_only_api_validates_context_and_keeps_assets_local(dashboard):
     service, _ = dashboard
     with DashboardServer(service, 0) as server:
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
-        origin = f"http://127.0.0.1:{server.server_port}"
         opener = build_opener(ProxyHandler({}))
+        origin = f"http://127.0.0.1:{server.server_port}"
         try:
-            for path, content_type in [
-                ("/", "text/html"),
-                ("/app.js", "text/javascript"),
-                ("/app.css", "text/css"),
-            ]:
-                with opener.open(origin + path) as response:
-                    assert response.status == 200
-                    assert content_type in response.headers["Content-Type"]
+            for asset in ("/", "/app.js", "/app.css"):
+                with opener.open(origin + asset) as response:
+                    assert response.status == 200 and response.read()
                     assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
-                    assert response.read()
-            service.client.fetch_live_data.assert_not_called()  # Serving assets does no inference.
-            with opener.open(origin + "/api/state") as response:
-                state = json.load(response)
-                assert state["status"] == "live"
-                assert response.headers["Cache-Control"] == "no-store"
-                assert "Access-Control-Allow-Origin" not in response.headers
-            for request, code in [
-                (Request(origin + "/api/state", headers={"Host": "foreign.example"}), 403),
+            with opener.open(origin + "/api/state?team=100&actor=team") as response:
+                result = json.load(response)
+                assert result["recommendation"]["actor"] == "team"
+            for request, code in (
+                (Request(origin + "/api/state?team=100&role=invalid"), 400),
+                (Request(origin + "/api/state?team=100&team=200"), 400),
                 (
                     Request(origin + "/api/state", headers={"Origin": "https://foreign.example"}),
                     403,
                 ),
-                (Request(origin + "/api/state", method="POST", data=b"{}"), 501),
                 (Request(origin + "/../workflow.json"), 404),
-            ]:
+            ):
                 with pytest.raises(HTTPError) as error:
                     opener.open(request)
                 assert error.value.code == code
         finally:
             server.shutdown()
             thread.join(timeout=5)
-
-
-@pytest.mark.parametrize("interval", [float("nan"), float("inf"), 0, 1])
-def test_invalid_intervals_fail_before_model_loading(interval):
-    with pytest.raises(ValueError, match="at least 2"):
-        run_ui("unused-model", interval=interval)
-
-
-def test_server_startup_failure_closes_client(dashboard, monkeypatch):
-    pytest.importorskip("torch")
-    service, _ = dashboard
-    monkeypatch.setattr(
-        "offline_rift.inference.live_client.LiveClientInference", Mock(return_value=service.client)
-    )
-    monkeypatch.setattr(
-        "offline_rift.ui.server.DashboardServer", Mock(side_effect=OSError("port in use"))
-    )
-    with pytest.raises(OSError, match="port in use"):
-        run_ui("unused-model")
-    service.client.close.assert_called_once()

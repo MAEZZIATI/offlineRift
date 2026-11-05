@@ -1,83 +1,101 @@
-"""One model, one bounded snapshot cache, and no background polling."""
-
-from __future__ import annotations
+"""Shared observation cache; actor/role decisions are evaluated against the same snapshot."""
 
 import logging
 import threading
 import time
 from copy import deepcopy
 
-from rift_common.pipeline.actions import action_names
+from rift_common.actions import ACTION_NAMES, ROLES, action_catalog
 
-from offline_rift.inference.live_client import LiveClientInference, LiveClientUnavailable
+from offline_rift.inference.transport import LiveClientUnavailable
 
 LOG = logging.getLogger(__name__)
 
 
-def model_summary(metadata: dict) -> dict:
-    report = metadata.get("training_report", {})
-    predictions = report.get("validation_prediction_counts", [])
-    counts = report.get("action_counts", [])
-    return {
-        "collapsed": bool(predictions) and sum(n > 0 for n in predictions) == 1,
-        "action_coverage": sum(n > 0 for n in counts),
-        "action_counts": counts,
-        "heuristic_agreement": report.get("validation_heuristic_agreement"),
-        "majority_baseline": report.get("validation_majority_baseline"),
-        "prediction_counts": predictions,
-        "balanced_accuracy": report.get("validation_balanced_accuracy"),
-        "macro_f1": report.get("validation_macro_f1"),
-        "prediction_method": report.get("prediction_mode"),
-    }
-
-
 class LiveDashboard:
-    def __init__(self, client: LiveClientInference):
+    def __init__(self, client):
         if client.interval_seconds < 2:
             raise ValueError("UI polling interval must be at least 2 seconds")
         self.client = client
-        self.model = model_summary(client.policy.metadata)
-        self._lock = threading.Lock()
-        self._next_poll = 0.0
-        self._state: dict = {}
-
-    def state(self) -> dict:
-        # Multiple tabs share one game fetch. The lock also serializes model inference.
-        with self._lock:
-            if time.monotonic() >= self._next_poll:
-                self._state = self._poll()
-                self._next_poll = time.monotonic() + self.client.interval_seconds
-            state = deepcopy(self._state)
-            state["valid_for_ms"] = max(0, int((self._next_poll - time.monotonic()) * 1000))
-            return state
-
-    def _poll(self) -> dict:
-        state = {
-            "status": "offline",
-            "checked_at": time.time(),
-            "recommendations": {},
-            "model": self.model,
-            "actions": action_names(self.client.policy.metadata),
-            "transport": self.client.source.transport,
-            "default_team": self.client.team,
-            "interval_seconds": self.client.interval_seconds,
+        self.lock = threading.Lock()
+        self.next_poll = 0.0
+        self.snapshot = None
+        self.checked_at = 0
+        self.failure = None
+        self.cache = {}
+        metadata = client.policy.metadata
+        report = metadata["training_report"]
+        metrics = report["validation"]
+        self.model = {
+            "name": client.policy.name,
+            "prediction_method": metadata["algorithm"],
+            "action_counts": report["action_counts"],
+            "prediction_counts": metrics["prediction_counts"],
+            "action_coverage": sum(n > 0 for n in report["action_counts"]),
+            "behavior_agreement": metrics["behavior_agreement"],
+            "majority_baseline": report["majority_baseline"],
+            "balanced_accuracy": metrics["balanced_accuracy"],
+            "macro_f1": metrics["macro_f1"],
+            "collapsed": metrics["collapsed"],
+            "stage": "experimental_next_action_policy",
+            "per_group": report.get("per_group", {}),
         }
-        try:
-            snapshot = self.client.adapter.snapshot(self.client.fetch_live_data())
-            recommendations = {
-                str(team): self.client.recommend(snapshot, team) for team in (100, 200)
+
+    def state(self, *, team=None, actor=None, role=None):
+        role = self.client.role if role is None else role
+        team = self.client.team if team is None else team
+        actor = self.client.actor if actor is None else actor
+        if team not in (100, 200) or role is not None and role not in ROLES:
+            raise ValueError("Invalid team or role")
+        with self.lock:
+            if time.monotonic() >= self.next_poll:
+                self.cache.clear()
+                self.snapshot = None
+                self.failure = None
+                try:
+                    self.snapshot = self.client.adapter.snapshot(self.client.fetch_live_data())
+                except LiveClientUnavailable as error:
+                    self.failure = ("offline", str(error))
+                except (ValueError, TypeError, KeyError) as error:
+                    self.failure = ("invalid_state", str(error))
+                except Exception:
+                    LOG.exception("Live observation failed")
+                    self.failure = ("error", "Observation unavailable. Check the server terminal.")
+                self.checked_at = time.time()
+                self.next_poll = time.monotonic() + self.client.interval_seconds
+            base = {
+                "checked_at": self.checked_at,
+                "valid_for_ms": max(0, int((self.next_poll - time.monotonic()) * 1000)),
+                "interval_seconds": self.client.interval_seconds,
+                "transport": self.client.source.transport,
+                "model": self.model,
+                "actions": ACTION_NAMES,
+                "catalog": action_catalog(),
+                "default_team": self.client.team,
+                "players": [],
+                "active_player": None,
             }
-            state.update(status="live", recommendations=recommendations)
-        except LiveClientUnavailable as error:
-            state["message"] = str(error)
-        except (KeyError, TypeError, ValueError) as error:
-            state.update(status="invalid_state", message=str(error))
-        except Exception:
-            # Discard every old recommendation, including after unexpected model errors.
-            LOG.exception("Live dashboard inference failed")
-            state.update(status="error", message="Inference failed. Check the server terminal.")
-        state["checked_at"] = time.time()
-        return state
+            if self.failure:
+                return deepcopy({**base, "status": self.failure[0], "message": self.failure[1]})
+            snapshot = self.snapshot
+            base["players"] = [
+                {"id": p.id, "team": p.team, "champion": p.champion, "role": p.role}
+                for p in snapshot.players
+            ]
+            base["active_player"] = snapshot.active_player
+            key = (team, actor, role)
+            if key not in self.cache:
+                try:
+                    self.cache[key] = self.client.recommend(snapshot, team, actor, role)
+                except (ValueError, KeyError, TypeError) as error:
+                    self.cache[key] = {"status": "invalid_context", "message": str(error)}
+                except Exception:
+                    LOG.exception("Policy evaluation failed")
+                    self.cache[key] = {
+                        "status": "error",
+                        "message": "Policy evaluation failed. Check the server terminal.",
+                    }
+            return deepcopy({**base, "status": "live", "recommendation": self.cache[key]})
 
     def close(self):
         self.client.close()

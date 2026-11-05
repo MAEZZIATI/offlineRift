@@ -1,91 +1,114 @@
 # Offline Rift
 
-A Python backend for causal Match-V5 datasets, team formation models, and local League
-Live Client inference. Training uses real cached matches. Formation scores describe
-patterns in weak labels; they do not establish good strategy or win probabilities.
+A local, experimental next-action companion for League of Legends. It collects real
+Match-V5 data, reconstructs executed options over measured observation intervals,
+and trains an actor/role-conditioned policy against terminal team win/loss rewards.
+It recommends **what to consider doing next**, rather than classifying the current
+team formation. Improved live win rate and optimal play have not been established.
 
-## Source layout
+## Layout
 
 | Folder | Responsibility |
 |---|---|
-| `production/src/offline_rift/` | Collection workflow, maintained trainers, policy serving, live adapter and dashboard |
-| `common/src/rift_common/` | Shared feature/action contracts, causal timeline processing, datasets, neural components, splits and artifact integrity |
-| `research/src/rift_research/` | Optional comparisons, bootstrap studies, cohort expansion, memory experiments and labeling |
-| `tests/` | All tests, with one shared fixture module |
-| `docs/` | Operational documentation and interfaces |
-| `research/docs/` | Experiment results, label audits, research plans and papers |
+| `production/` | Riot collection, patch catalogs, workflow, training, inference and local dashboard |
+| `common/` | Action/state contracts, causal timeline reconstruction, explicit transitions, network and persistence |
+| `research/` | New-objective dataset audits, frozen-policy diagnostics and study protocol |
+| `tests/` | Every test, with synthetic fixtures used only for deterministic verification |
 
-Production and research depend on common code. Production never imports research.
-Research is a separate optional package and is excluded from the production wheel.
-See [the structure guide](docs/STRUCTURE.md) for installation and dependency boundaries.
+Production never imports research. Common imports neither application. Research is an
+optional package excluded from the production wheel. There is one maintained workflow
+and one policy network; there is no formation-classifier or classifier/Q-score blend.
 
 ## Install
 
-Use the existing `.venv`; Python 3.10+ is required:
+Use the existing Python 3.10+ `.venv`:
 
 ```bash
-uv pip install --python .venv/bin/python -e '.[train,dev]'
-
-# Optional: experiments and label review
-uv pip install --python .venv/bin/python -e ./research
+uv pip install --python .venv/bin/python -e '.[train,dev]' -e ./research
 ```
 
-A classifier-only inference deployment can install `.[inference]` without d3rlpy or the
-research package. Existing CQL/hybrid bundles require the `train` extra for d3rlpy.
-No credentials, cached games or learned weights are included in these packages.
+Training and inference use Torch. The small discrete CQL implementation directly uses
+stored next states, elapsed-time discounting and action masks; it does not need d3rlpy.
+The `bc` algorithm is an imitation baseline for comparisons, not the RL default.
 
-## Everyday workflow
+## Collect, build and train
 
-Run from the repository root. The local `workflow.json` retains your configured PUUIDs,
-regional routing, paths and settings; do not initialize it again.
+The local `workflow.json` was migrated to version 2 using the previously verified player
+identities. Raw games, catalogs and historical artifacts were preserved. Do not initialize
+that existing configuration again.
 
 ```bash
 .venv/bin/rift status
 .venv/bin/rift build
-.venv/bin/rift ui
+.venv/bin/rift train --algorithm cql --steps 10000
 ```
 
-`rift build` uses cached matches and patch-matched item catalogs. Missing catalogs need
-internet access. `rift ui` uses the current completed model and serves the dashboard
-at http://localhost:8765. Live access requires an active Summoner's Rift game; WSL can
-use Windows loopback through the existing `auto` transport. See [live setup](docs/LIVE_UI.md).
-
-To collect additional history from the configured account:
+Collection uses `RIOT_API_KEY` in the token header. It defaults to the configured primary
+PUUID; collecting every configured account is explicit:
 
 ```bash
 export RIOT_API_KEY='your-current-key'
 .venv/bin/rift collect --count 100
+.venv/bin/rift collect --all-players --count 25
+.venv/bin/rift add-player --riot-id 'Name#TAG' --region asia
 ```
 
-Collection is resumable, caches raw payloads by match ID and deduplicates shared games.
-Keep API keys in the environment. Local settings, data, catalogs, logs and models are
-ignored by Git. Previous completed and interrupted experiments are retained.
+Pagination, bounded retries, Retry-After, deduplication, atomic caching and interrupted
+batch reports are retained. No Riot request is needed to build from cached games and
+cached patch catalogs. Missing catalog versions fail or download the exact patch;
+there is no nearest-patch fallback. Objective estimates currently cover patches 16.16–16.22.
 
-## Iterate without label review
+Fresh projects can use `rift init --puuid VERIFIED_PUUID --region asia --name my-project`.
+Never infer a professional identity from a player name. Configuration examples are in
+`configs/workflow.example.json`; the root `workflow.json` is local and ignored.
 
-Independent labeling is deferred and stays in the optional research package. Train a
-separate candidate from a development dataset using the maintained trainer:
+## Run the app
 
 ```bash
-.venv/bin/rift-train --algorithm imitation --encoder-type mlp \
-  --dataset /path/to/development/transitions.npz \
-  --output /path/to/new/candidate --steps 10000 --batch-size 128
-
-# Preview a candidate explicitly, without replacing the current model:
-.venv/bin/rift-ui --model /path/to/new/candidate
+.venv/bin/rift ui --interval 10
 ```
 
-Each candidate uses a new directory and saves metadata, weights, checksums and a run
-report. `--split-from /path/to/reference/bundle` reuses its exact match split for
-comparisons. CPU training defaults to two threads; accelerator training transfers only
-sampled batches. The imitation path trains no CQL model and serves without Q values.
-CQL/hybrid training remains available through `--algorithm cql`.
+Open **http://localhost:8765**. Select **Me**, a specific live player, or **Selected team**.
+If the API does not identify your player or role, choose it explicitly; the app does not
+guess from a champion. Role-specific advice includes the action, instruction, map checks
+and a nominal next-minute horizon. Source data are coarse, so this is not a micro-mechanics
+or spell-timing coach. “Continue current activity” and insufficient-support responses are
+valid outputs; the app does not force a new macro every poll.
 
-`rift train` / `rift run` retain the reviewed-promotion gate for corrected objective
-rules. Experimental training does not update the active reference. Review and later
-promotion are separate from improving the training/inference implementation.
+```bash
+# Explicit completed bundle:
+.venv/bin/rift-ui --model /path/to/next-action-policy --transport auto
+# One local poll:
+.venv/bin/rift live --once --actor active --role JUNGLE
+```
 
-## Validate
+The game API is available during an active 5v5 game. WSL can use the Windows bridge.
+The dashboard is localhost-only, clears expired advice, supports focus/pause controls
+and does not record sessions. Restart its command after updating browser assets.
+
+## Research and limitations
+
+```bash
+.venv/bin/rift-research dataset --dataset /path/to/transitions.npz
+.venv/bin/rift-research evaluate --dataset /path/to/transitions.npz \
+  --bundle /path/to/policy --output /path/to/new/evaluation
+```
+
+See [the modeling contract](docs/MODELING.md), [action catalog](docs/ACTIONS.md),
+[architecture](docs/ARCHITECTURE.md) and [new research protocol](research/README.md) and [initial observed study](research/docs/INITIAL_STUDY.md).
+Actions are reconstructed from observed behavior, not logged player commands or known
+intent. State history is causal. Live coordinates, vision, waves, camp availability and
+cast history are not invented. Both teams and all players from a match stay together in
+train/validation splits. Q values are return estimates, not win probabilities. Behavior
+agreement, macro F1 and prediction coverage diagnose data/support; they are not policy
+win-rate or counterfactual improvement estimates.
+
+The former objective's source, research documents and local configuration were archived
+under `data/archive/` and removed from maintained code. Old datasets/models remain stored
+but are intentionally rejected by the new schema. New latest references live under
+`data/projects/<name>/next-actions/`, separate from the old model pointer.
+
+## Validation
 
 ```bash
 .venv/bin/ruff check .
@@ -94,15 +117,5 @@ promotion are separate from improving the training/inference implementation.
 git diff --check
 ```
 
-Tests use deterministic fixtures and mocked external services. Real optimizer tests
-remain short and local. The dashboard integration test opens a localhost socket.
-Install `./research` to run the full suite, including optional experiment/review tests.
-
-Further documentation: [workflow](docs/WORKFLOW.md), [backend](docs/BACKEND.md),
-[execution](docs/EXECUTION.md), and [research workspace](research/README.md).
-
-The [2026-11-05 iteration](research/docs/ITERATION_20261105.md) produced an inference-ready
-experimental MLP candidate with 23.32% macro F1 on 846 matches excluded from fitting,
-versus 21.98% for the corrected hybrid. Its overall label agreement is lower. Preview it
-with `rift-ui --model models/candidates/20261105-imitation-mlp-seed43-v1`;
-the active model reference is unchanged.
+Tests never call Riot or Data Dragon. Browser tests, when enabled with `RIFT_TEST_BROWSER`,
+use local synthetic UI fixtures. Full tests need the training and research packages.
