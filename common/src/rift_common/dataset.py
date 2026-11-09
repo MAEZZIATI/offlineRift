@@ -8,11 +8,26 @@ from pathlib import Path
 import numpy as np
 
 from rift_common.actions import ACTION_NAMES, ACTION_SCHEMA, ROLES, feasible_actions, group_index
-from rift_common.behavior import player_behavior, team_behavior
+from rift_common.behavior import player_activity, team_activity
 from rift_common.state import STATE_SCHEMA, StateEncoder
 from rift_common.timeline import read_match
 
-DATASET_SCHEMA = "option-transitions-v1"
+DATASET_SCHEMA = "option-transitions-v3"
+
+
+def episode_returns(arrays, gamma):
+    """Real terminal rewards, discounted over complete stored actor episodes; targets only."""
+    result = np.empty(len(arrays["rewards"]), dtype=np.float32)
+    continuation = 0.0
+    for i in range(len(result) - 1, -1, -1):
+        if arrays["terminals"][i]:
+            continuation = 0.0
+        continuation = (
+            float(arrays["rewards"][i])
+            + gamma ** (float(arrays["durations"][i]) / 60) * continuation
+        )
+        result[i] = continuation
+    return result
 
 
 class DatasetBuilder:
@@ -48,15 +63,16 @@ class DatasetBuilder:
                 for index, (current, following) in enumerate(pairwise(observations)):
                     if current.time < self.minimum_time:
                         continue
-                    behavior = (
-                        team_behavior(current, following, team)
+                    activity = (
+                        team_activity(current, following, team)
                         if actor is None
-                        else player_behavior(current, following, actor)
+                        else player_activity(current, following, actor)
                     )
-                    if behavior is None:
+                    if activity is None:
                         self.excluded["incomplete_behavior_episodes"] += 1
                         episode = []
                         break
+                    behavior = activity.representative
                     state = encoder.encode(
                         current, team, actor, previous=observations[index - 1] if index else None
                     )
@@ -67,11 +83,17 @@ class DatasetBuilder:
                         episode = []
                         break
                     terminal = index == len(observations) - 2
+                    candidates = np.zeros(len(ACTION_NAMES), dtype=bool)
+                    candidates[list(activity.candidates)] = True
                     episode.append(
                         {
                             "observations": state,
                             "next_observations": next_state,
                             "actions": int(behavior.action),
+                            "activity_candidates": candidates,
+                            "action_identified": activity.identified,
+                            "death_participation": activity.death_participation,
+                            "combat_credit": activity.combat_credit,
                             "rewards": outcome if terminal else 0.0,
                             "terminals": terminal,
                             "durations": following.time - current.time,
@@ -116,6 +138,8 @@ class DatasetBuilder:
             "provenance": provenance,
             "excluded": dict(self.excluded),
             "behavior_evidence": dict(self.evidence),
+            "target_schema": "executed-evidence-v3",
+            "target_limitations": "Representative actions remain descriptive; ambiguous intervals are retained but excluded from action-specific fitting",
         }
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -132,7 +156,8 @@ def load_dataset(path):
 
     names = StateEncoder(ItemCatalog(metadata["item_catalog"])).names
     if (
-        metadata.get("dataset_schema") != DATASET_SCHEMA
+        metadata.get("dataset_schema")
+        not in {DATASET_SCHEMA, "option-transitions-v2", "option-transitions-v1"}
         or metadata.get("state_schema") != STATE_SCHEMA
         or metadata.get("action_schema") != ACTION_SCHEMA
         or metadata["feature_names"] != names
@@ -156,6 +181,20 @@ def load_dataset(path):
         "action_masks",
         "next_action_masks",
     }
+    if metadata["dataset_schema"] in {DATASET_SCHEMA, "option-transitions-v2"}:
+        required |= {
+            "activity_candidates",
+            "action_identified",
+            "death_participation",
+            "combat_credit",
+        }
+        expected_target = (
+            "executed-evidence-v3"
+            if metadata["dataset_schema"] == DATASET_SCHEMA
+            else "executed-evidence-v2"
+        )
+        if metadata.get("target_schema") != expected_target:
+            raise ValueError("Invalid activity target schema")
     if set(arrays) != required:
         raise ValueError("Missing or unexpected transition arrays")
     n = len(arrays["actions"])
@@ -199,6 +238,19 @@ def load_dataset(path):
             raise ValueError("Invalid feasibility masks")
     if not arrays["action_masks"][np.arange(n), arrays["actions"]].all():
         raise ValueError("Recorded action is infeasible")
+    if "activity_candidates" in arrays:
+        candidates = arrays["activity_candidates"]
+        if (
+            candidates.dtype != bool
+            or candidates.shape != (n, len(ACTION_NAMES))
+            or not candidates[np.arange(n), arrays["actions"]].all()
+        ):
+            raise ValueError("Invalid activity evidence candidates")
+        for key in ("action_identified", "death_participation", "combat_credit"):
+            if arrays[key].dtype != bool or arrays[key].shape != (n,):
+                raise ValueError("Invalid activity evidence flags")
+        if np.any(arrays["action_identified"] & (candidates.sum(1) != 1)):
+            raise ValueError("Ambiguous activity marked identified")
     if not np.array_equal(
         arrays["action_masks"], feasible_actions(arrays["observations"], names)
     ) or not np.array_equal(

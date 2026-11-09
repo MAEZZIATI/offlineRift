@@ -5,7 +5,7 @@ import threading
 import time
 from copy import deepcopy
 
-from rift_common.actions import ACTION_NAMES, ROLES, action_catalog
+from rift_common.actions import ACTION_NAMES, GROUPS, ROLES, Action, action_catalog
 
 from offline_rift.inference.transport import LiveClientUnavailable
 
@@ -26,20 +26,35 @@ class LiveDashboard:
         metadata = client.policy.metadata
         report = metadata["training_report"]
         metrics = report["validation"]
+        action_counts = report["action_counts"]
+        baseline = report["majority_baseline"]
+        scope = metadata.get("advisory_groups", list(GROUPS))
+        if len(scope) == 1 and scope[0] in report.get("per_group", {}):
+            metrics = report["per_group"][scope[0]]
+            action_counts = report["counts_by_group"][GROUPS.index(scope[0])]
+            majority = max(range(len(action_counts)), key=action_counts.__getitem__)
+            baseline = metrics["action_support"][majority] / max(1, sum(metrics["action_support"]))
         self.model = {
             "name": client.policy.name,
             "prediction_method": metadata["algorithm"],
-            "action_counts": report["action_counts"],
+            "action_counts": action_counts,
             "prediction_counts": metrics["prediction_counts"],
-            "action_coverage": sum(n > 0 for n in report["action_counts"]),
+            "action_coverage": sum(n > 0 for n in action_counts),
             "behavior_agreement": metrics["behavior_agreement"],
-            "majority_baseline": report["majority_baseline"],
+            "majority_baseline": baseline,
+            "advisory_groups": scope,
             "balanced_accuracy": metrics["balanced_accuracy"],
             "macro_f1": metrics["macro_f1"],
             "collapsed": metrics["collapsed"],
             "stage": "experimental_next_action_policy",
             "per_group": report.get("per_group", {}),
+            "policy_count": 6 if metadata.get("bundle_schema") == "six-policy-coach-v1" else 1,
         }
+        self.model["per_group"] = deepcopy(self.model["per_group"])
+        for group in self.model["per_group"].values():
+            voluntary = group["prediction_counts"].copy()
+            voluntary[Action.WAIT_RESPAWN] = 0
+            group["voluntary_prediction_counts"] = voluntary
 
     def state(self, *, team=None, actor=None, role=None):
         role = self.client.role if role is None else role
@@ -53,7 +68,7 @@ class LiveDashboard:
                 self.snapshot = None
                 self.failure = None
                 try:
-                    self.snapshot = self.client.adapter.snapshot(self.client.fetch_live_data())
+                    self.snapshot = self.client.observe_once()
                 except LiveClientUnavailable as error:
                     self.failure = ("offline", str(error))
                 except (ValueError, TypeError, KeyError) as error:

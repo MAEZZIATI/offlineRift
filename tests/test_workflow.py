@@ -2,6 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import numpy as np
 import pytest
 from offline_rift.workflow import Workflow
 from rift_common.artifacts import atomic_json
@@ -69,14 +70,63 @@ def test_legacy_workflow_is_rejected_without_modification(tmp_path):
     assert path.read_bytes() == before
 
 
+def test_reload_parity_failure_preserves_active_model_and_failed_report(
+    tmp_path, match_payloads, catalog, monkeypatch
+):
+    from rift_common.artifacts import read_json
+
+    workflow = prepare(tmp_path, match_payloads)
+    data = workflow.build(cache=SimpleNamespace(get=lambda patch: (catalog, "16.22.1", "hash")))
+    previous = workflow.state()
+    previous["model"] = {"path": "prior-model", "fingerprint": "prior"}
+    atomic_json(workflow.state_path, previous)
+    monkeypatch.setattr(
+        "offline_rift.inference.policy.NextActionPolicy.predict_batch",
+        lambda self, observed, groups, masks: (np.full(len(observed), -1), None),
+    )
+    with pytest.raises(RuntimeError, match="serving prediction parity"):
+        workflow.train(data, force=True)
+    assert workflow.state()["model"] == previous["model"]
+    runs = list(workflow.path("models").glob("*/run.json"))
+    assert len(runs) == 1 and read_json(runs[0])["status"] == "failed"
+
+
 def test_reused_model_is_reloaded_and_rejects_corruption(tmp_path, match_payloads, catalog):
     workflow = prepare(tmp_path, match_payloads)
     data = workflow.build(cache=SimpleNamespace(get=lambda patch: (catalog, "16.22.1", "hash")))
     model = workflow.train(data)
     assert workflow.train(data) == model
+    before = workflow.state_path.read_bytes()
+    verified = workflow.verify()
+    assert verified["status"] == "verified" and verified["serving_replay_verified"]
+    assert verified["validation_matches"] == 1
+    assert not verified["production_strategy_validated"]
+    assert verified["single_state_latency_ms"]["samples"] == 50
+    assert workflow.state_path.read_bytes() == before
     with (Path(model["path"]) / "policy.pt").open("ab") as stream:
         stream.write(b"corrupted")
     previous = workflow.state_path.read_bytes()
     with pytest.raises(ValueError, match="integrity"):
         workflow.train(data)
+    with pytest.raises(ValueError, match="integrity"):
+        workflow.verify()
     assert workflow.state_path.read_bytes() == previous
+
+
+def test_activation_retains_previous_reference_and_verifies_first(
+    tmp_path, match_payloads, catalog
+):
+    from rift_common.artifacts import read_json
+
+    workflow = prepare(tmp_path, match_payloads)
+    data = workflow.build(cache=SimpleNamespace(get=lambda patch: (catalog, "16.22.1", "hash")))
+    model = workflow.train(data)
+    activated = workflow.activate(model["path"])
+    assert activated["stage"] == "ranked_acceptance_candidate"
+    history = list((workflow.path("artifacts") / "activations").glob("*.json"))
+    assert len(history) == 1 and read_json(history[0])["previous"] == model
+    (Path(model["path"]) / "policy.pt").write_bytes(b"broken")
+    before = workflow.state_path.read_bytes()
+    with pytest.raises(ValueError, match="integrity"):
+        workflow.activate(model["path"])
+    assert workflow.state_path.read_bytes() == before

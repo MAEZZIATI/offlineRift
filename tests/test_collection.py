@@ -62,3 +62,35 @@ def test_exact_catalog_patch_and_missing_patch_refusal(tmp_path, catalog):
     atomic_json(tmp_path / "items-16.20.json", {"version": "16.22.1", "data": catalog.data})
     with pytest.raises(ValueError, match="mismatch"):
         cache.get("16.20")
+
+
+@pytest.mark.parametrize("cached", [False, True])
+@pytest.mark.parametrize("fault", ["timeline_id", "empty_frames", "identity"])
+def test_bad_payloads_are_not_published_or_silently_reused(tmp_path, match_payloads, cached, fault):
+    match, timeline = match_payloads("KR_1")
+    if fault == "timeline_id":
+        timeline["metadata"] = {"matchId": "KR_wrong"}
+    elif fault == "empty_frames":
+        timeline["info"]["frames"] = []
+    else:
+        for participant in match["info"]["participants"]:
+            participant["puuid"] = "different"
+    path = tmp_path / "raw/KR_1.json"
+    if cached:
+        atomic_json(path, {"match": match, "timeline": timeline})
+        original = path.read_bytes()
+    api = Mock()
+    api.fetch_match_ids.return_value = ["KR_1"]
+    api.fetch_match.return_value = match
+    api.fetch_timeline.return_value = timeline
+    with pytest.raises(ValueError, match="configured identity"):
+        Collector(tmp_path / "raw", tmp_path / "artifacts").collect(
+            {"puuid": "player-1", "region": "asia"}, count=1, api=api
+        )
+    if cached:
+        assert path.read_bytes() == original
+        api.fetch_match.assert_not_called()
+    else:
+        assert not path.exists()
+    reports = list((tmp_path / "artifacts/batches").glob("*.json"))
+    assert len(reports) == 1 and read_json(reports[0])["status"] == "failed"

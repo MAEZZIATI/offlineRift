@@ -123,6 +123,11 @@ def add_ui_arguments(parser: argparse.ArgumentParser):
         help="auto uses Windows curl.exe in WSL when available, otherwise local HTTP",
     )
     parser.add_argument("--ca-bundle", help="Optional Riot root certificate for TLS verification")
+    parser.add_argument(
+        "--capture-session",
+        type=Path,
+        help="Opt in to recording measured inputs and served dashboard advice",
+    )
 
 
 def run_ui(
@@ -135,6 +140,7 @@ def run_ui(
     port=8765,
     transport="auto",
     ca_bundle=None,
+    capture_session=None,
 ):
     if not 1 <= port <= 65535:
         raise ValueError("UI port must be between 1 and 65535")
@@ -154,12 +160,15 @@ def run_ui(
         interval_seconds=interval,
         transport=transport,
         verify_tls=ca_bundle or False,
+        capture_session=capture_session,
     )
     try:
         dashboard = LiveDashboard(client)
         with DashboardServer(dashboard, port) as server:
             print(f"Offline Rift UI: http://127.0.0.1:{server.server_port}", flush=True)
             print(f"Game transport: {client.source.transport}. Press Ctrl+C to stop.", flush=True)
+            if capture_session is not None:
+                print(f"Session recording: {Path(capture_session).resolve()}", flush=True)
             server.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:
         pass
@@ -185,6 +194,7 @@ def main():
             port=args.port,
             transport=args.transport,
             ca_bundle=args.ca_bundle,
+            capture_session=args.capture_session,
         )
     except (ValueError, OSError, RuntimeError, ImportError) as error:
         parser.exit(1, f"Error: {error}\n")

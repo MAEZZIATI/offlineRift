@@ -7,7 +7,7 @@ The UI shows other supported choices; scores are never presented as win probabil
 
 | Option | Meaning and reconstruction evidence |
 |---|---|
-| Continue current activity | No large resolved area transition; for a team, no observed majority transition. Not a universal missing-data fallback. |
+| Continue current activity | No large resolved player-area transition. Team rows with no coherent executed macro evidence remain unresolved and are not positive strategy targets. |
 | Farm top lane | Lane CS increases while both endpoints remain in the top lane band. Check waves/threats yourself. |
 | Farm mid lane | The equivalent observed mid-lane income behavior. |
 | Farm bottom lane | The equivalent observed bottom-lane income behavior. |
@@ -24,7 +24,8 @@ The UI shows other supported choices; scores are never presented as win probabil
 | Rotate through jungle | A resolved move from another coarse area into jungle. Does not assert invade safety, camp availability or an exact route. |
 
 The player version is conditioned on TOP, JUNGLE, MIDDLE, BOTTOM or UTILITY. Team actions
-require at least three members with the corresponding behavior; individual farming and
+require at least three identified matching executed macro options; combat and unresolved
+consensus never identify a voluntary team plan. Individual farming and
 respawn options are unavailable for the team subject. A player's potential choices are
 restricted by observed role support, not by assuming each role must always perform one
 scripted behavior.

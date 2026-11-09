@@ -5,6 +5,7 @@ from pathlib import Path
 from shutil import copy2
 
 import numpy as np
+from offline_rift.inference import policy
 from offline_rift.training import augmentation, iql, trainer
 from offline_rift.training.trainer import PolicyTrainer, TrainConfig
 from offline_rift.workflow import Workflow
@@ -15,7 +16,17 @@ from rift_research import evaluation
 from rift_research.evaluation import describe_dataset, evaluate_policy
 
 
-def run_study(config, output, *, steps=10000, seeds=(42, 43), samples=500, suite="algorithms"):
+def run_study(
+    config,
+    output,
+    *,
+    steps=10000,
+    seeds=(42, 43),
+    samples=500,
+    suite="algorithms",
+    holdout_matches=(),
+    corpus_matches=None,
+):
     output = Path(output)
     if output.exists():
         raise FileExistsError(output)
@@ -23,7 +34,7 @@ def run_study(config, output, *, steps=10000, seeds=(42, 43), samples=500, suite
         raise ValueError("Use distinct optimizer seeds")
     if samples < 1:
         raise ValueError("Positive bootstrap samples required")
-    base = TrainConfig(steps=steps, split_seed=42)
+    base = TrainConfig(steps=steps, split_seed=42, holdout_matches=tuple(holdout_matches))
     variants = {
         "bc": {"algorithm": "bc"},
         "cql-alpha-0.03": {"alpha": 0.03},
@@ -39,13 +50,47 @@ def run_study(config, output, *, steps=10000, seeds=(42, 43), samples=500, suite
             "cql-bounded": {"bounded_values": True},
             "cql-bounded-joint": {"bounded_values": True, "joint_history_dropout": 0.2},
         }
+    elif suite == "readiness":
+        variants = {
+            "cql-alpha-0.1": {},
+            **{
+                f"cql-bounded-joint-alpha-{alpha}": {
+                    "alpha": alpha,
+                    "bounded_values": True,
+                    "joint_history_dropout": 0.2,
+                }
+                for alpha in (0.03, 0.1, 0.3)
+            },
+            "bc-joint-history": {"algorithm": "bc", "joint_history_dropout": 0.2},
+        }
+    elif suite in {"evidence", "evidence-low-alpha"}:
+        base = replace(base, joint_history_dropout=0.2, bounded_values=True, minimum_score_gap=0.02)
+        variants = {
+            "cql-representative": {"target_mode": "representative"},
+            "cql-identified": {"target_mode": "identified"},
+            "bc-identified": {"algorithm": "bc", "bounded_values": False, "minimum_score_gap": 0},
+        }
+        if suite == "evidence-low-alpha":
+            base = replace(base, minimum_score_gap=0)
+            variants = {
+                f"cql-identified-alpha-{alpha}": {"alpha": alpha, "target_mode": "identified"}
+                for alpha in (0.01, 0.03)
+            }
     elif suite != "algorithms":
         raise ValueError("Unknown experiment suite")
     output.mkdir(parents=True, exist_ok=False)
     sources = {
         **{
             module.__name__: Path(module.__file__)
-            for module in (trainer, augmentation, iql, network, observation_masks, evaluation)
+            for module in (
+                trainer,
+                augmentation,
+                iql,
+                network,
+                observation_masks,
+                policy,
+                evaluation,
+            )
         },
         "rift_research.experiments": Path(__file__),
     }
@@ -73,7 +118,11 @@ def run_study(config, output, *, steps=10000, seeds=(42, 43), samples=500, suite
     }
     atomic_json(output / "study.json", report)
     try:
-        data = Workflow(config).build()
+        data = (
+            Workflow(config).build(match_ids=set(corpus_matches))
+            if corpus_matches is not None
+            else Workflow(config).build()
+        )
         report.update(
             status="running",
             dataset=data,
@@ -103,6 +152,8 @@ def run_study(config, output, *, steps=10000, seeds=(42, 43), samples=500, suite
                         "bundle": str(bundle.resolve()),
                         "settings": asdict(replace(base, seed=seed, **settings)),
                         "metrics": evaluated["metrics"],
+                        "identified_metrics": evaluated.get("identified_metrics"),
+                        "retention_coverage": evaluated["retention_coverage"],
                         "per_group": evaluated["per_group"],
                         "score_quantiles": evaluated["score_quantiles"],
                         "last_optimizer": result["report"]["last_optimizer"],
@@ -118,7 +169,8 @@ def run_study(config, output, *, steps=10000, seeds=(42, 43), samples=500, suite
                     flush=True,
                 )
         # Paired prediction disagreements use identical rows and held-out matches.
-        baseline = np.load(output / f"cql-alpha-0.1-seed-{seeds[0]}/evaluation/predictions.npz")
+        reference = "cql-alpha-0.1" if "cql-alpha-0.1" in variants else next(iter(variants))
+        baseline = np.load(output / f"{reference}-seed-{seeds[0]}/evaluation/predictions.npz")
         try:
             for run in report["runs"]:
                 with np.load(output / run["name"] / "evaluation/predictions.npz") as archive:

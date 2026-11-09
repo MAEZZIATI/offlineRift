@@ -3,6 +3,7 @@
 import os
 import random
 import re
+import shlex
 import time
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -22,6 +23,26 @@ REGIONS = {
 
 class RiotAPIError(RuntimeError):
     pass
+
+
+def load_api_key(path):
+    """Load only RIOT_API_KEY, without executing dotenv text or replacing an env key."""
+    if os.environ.get("RIOT_API_KEY"):
+        return
+    text = Path(path).read_text()
+    # Existing local files may contain a bare token rather than dotenv syntax.
+    if re.fullmatch(r"RGAPI-[A-Za-z0-9-]+", text.strip()):
+        os.environ["RIOT_API_KEY"] = text.strip()
+        return
+    for line in text.splitlines():
+        key, separator, value = line.strip().removeprefix("export ").partition("=")
+        if separator and key.strip() == "RIOT_API_KEY":
+            parts = shlex.split(value, comments=True)
+            if len(parts) != 1 or not parts[0]:
+                raise ValueError("Invalid RIOT_API_KEY assignment in environment file")
+            os.environ["RIOT_API_KEY"] = parts[0]
+            return
+    raise ValueError("Environment file has no RIOT_API_KEY assignment")
 
 
 class RiotClient:
@@ -149,6 +170,17 @@ class Collector:
     def __init__(self, raw, artifacts):
         self.raw, self.artifacts = Path(raw), Path(artifacts)
 
+    @staticmethod
+    def validate_payload(payload, match_id, puuid):
+        match, timeline = payload["match"], payload["timeline"]
+        if (
+            match["metadata"]["matchId"] != match_id
+            or timeline.get("metadata", {}).get("matchId", match_id) != match_id
+            or not timeline["info"]["frames"]
+            or not any(p.get("puuid") == puuid for p in match["info"]["participants"])
+        ):
+            raise ValueError("Match/timeline does not bind configured identity or has no frames")
+
     def collect(self, player, *, count=100, start=0, queue=420, api=None):
         if count < 1 or start < 0:
             raise ValueError("Positive count and nonnegative start required")
@@ -181,25 +213,14 @@ class Collector:
                     path = self.raw / (match_id + ".json")
                     if path.exists():
                         payload = read_json(path)
-                        if (
-                            payload["match"]["metadata"]["matchId"] != match_id
-                            or not payload["timeline"]["info"]["frames"]
-                        ):
-                            raise ValueError("Invalid cached match preserved for inspection")
+                        self.validate_payload(payload, match_id, player["puuid"])
                         report["reused"].append(match_id)
                     else:
                         match = api.fetch_match(match_id)
                         timeline = api.fetch_timeline(match_id)
-                        if (
-                            match["metadata"]["matchId"] != match_id
-                            or timeline.get("metadata", {}).get("matchId", match_id) != match_id
-                            or not any(
-                                p.get("puuid") == player["puuid"]
-                                for p in match["info"]["participants"]
-                            )
-                        ):
-                            raise ValueError("Downloaded match does not bind configured identity")
-                        atomic_json(path, {"match": match, "timeline": timeline})
+                        payload = {"match": match, "timeline": timeline}
+                        self.validate_payload(payload, match_id, player["puuid"])
+                        atomic_json(path, payload)
                         report["downloaded"].append(match_id)
                     atomic_json(report_path, report)
                 if len(ids) < limit:

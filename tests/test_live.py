@@ -69,6 +69,16 @@ def test_history_rollbacks_duplicate_clock_and_incomplete_events():
     assert not current.objectives["dragon"]["enabled"]
 
 
+def test_future_history_marker_cannot_enable_objectives_and_game_end_clears_advice():
+    data = live_data(600)
+    data["events"]["Events"] = [{"EventName": "GameStart", "EventTime": 700}]
+    current = LiveStateAdapter().snapshot(data)
+    assert not current.history_complete and not current.objectives["dragon"]["enabled"]
+    data["events"]["Events"] = [{"EventName": "GameEnd", "EventTime": 599}]
+    with pytest.raises(ValueError, match="Game has ended"):
+        LiveStateAdapter().snapshot(data)
+
+
 def test_active_player_is_not_silently_replaced_with_team():
     client = LiveClientInference(policy=Mock(), session=Mock())
     data = live_data()
@@ -127,3 +137,111 @@ def test_capture_is_disabled_by_default_and_interrupt_retains_progress(
     client.run(max_polls=1)
     report = read_json(tmp_path / "capture/report.json")
     assert report["status"] == "interrupted" and report["polls"] == 0
+
+
+def test_session_capture_explicit_champion_adc_and_name_redaction(tmp_path, catalog):
+    policy = Mock(encoder=StateEncoder(catalog))
+    policy.name = "fixture"
+    policy.metadata = {
+        "algorithm": "cql",
+        "training_report": {
+            "action_counts": [10] * 15,
+            "majority_baseline": 0.3,
+            "validation": {
+                "prediction_counts": [10] * 15,
+                "behavior_agreement": 0.5,
+                "balanced_accuracy": 0.5,
+                "macro_f1": 0.5,
+                "collapsed": False,
+            },
+        },
+    }
+    policy.recommend.return_value = {
+        "status": "recommendation",
+        "actor": "Player1#TEST",
+        "team": 100,
+        "role": "BOTTOM",
+        "action_id": 3,
+        "scores": [None] * 15,
+    }
+    data = live_data(120, missing_roles=True)
+    data["allPlayers"][0]["championName"] = "Ezreal"
+    data["activePlayer"]["currentGold"] = 1200
+    data["events"]["Events"].append(
+        {
+            "EventName": "ChampionKill",
+            "EventTime": 110,
+            "KillerName": "Player1#TEST",
+            "VictimName": "Player6#TEST",
+        }
+    )
+    session = Mock()
+    session.get.return_value.status_code = 200
+    session.get.return_value.json.return_value = data
+    client = LiveClientInference(
+        policy=policy,
+        session=session,
+        team=100,
+        actor="champion:Ezreal",
+        role="BOTTOM",
+        capture_session=tmp_path / "session",
+    )
+    from offline_rift.ui.service import LiveDashboard
+
+    assert LiveDashboard(client).state()["recommendation"]["role"] == "BOTTOM"
+    saved = read_json(tmp_path / "session/samples/000001.json")
+    assert saved["active_current_gold"] == 1200
+    assert saved["active_slot"] == 0
+    assert saved["features"]["role_BOTTOM"] == 1
+    assert saved["events"][1]["KillerNameSlot"] == 0
+    assert "Player1" not in (tmp_path / "session/samples/000001.json").read_text()
+    # User-selected champion must exist on the requested side.
+    data["allPlayers"][0]["championName"] = "Other"
+    with pytest.raises(ValueError, match="Waiting for selected champion"):
+        client.infer_once()
+    assert read_json(tmp_path / "session/report.json")["samples"] == 1
+    data["allPlayers"][0]["championName"] = "Ezreal"
+    data["events"]["Events"].append({"EventName": "GameEnd", "EventTime": 120, "Result": "Win"})
+    with pytest.raises(ValueError, match="Game has ended"):
+        client.infer_once()
+    client.close()
+    assert read_json(tmp_path / "session/report.json")["game_end_observed"]
+    assert read_json(tmp_path / "session/samples/000002.json")["events"][-1]["Result"] == "Win"
+    with pytest.raises(FileExistsError):
+        LiveClientInference(policy=policy, session=Mock(), capture_session=tmp_path / "session")
+    from rift_research.session_audit import audit_session
+
+    audited = audit_session(tmp_path / "session", tmp_path / "audit", reported_outcome="win")
+    assert audited["samples"] == 2
+    assert audited["game_end_observed"]
+    assert audited["self_reported_outcome"] == "win"
+    assert audited["policy_winrate"] is None
+    assert len(audited["sample_sha256"]) == 2
+    with pytest.raises(FileExistsError):
+        audit_session(tmp_path / "session", tmp_path / "audit")
+
+
+def test_swiftplay_capture_survives_withheld_out_of_scope_advice(tmp_path, catalog):
+    policy = Mock(encoder=StateEncoder(catalog))
+    data = live_data()
+    data["gameData"]["gameMode"] = "SWIFTPLAY"
+    session = Mock()
+    session.get.return_value.status_code = 200
+    session.get.return_value.json.return_value = data
+    client = LiveClientInference(
+        policy=policy, session=session, capture_session=tmp_path / "session"
+    )
+    with pytest.raises(ValueError, match="game mode"):
+        client.infer_once()
+    policy.recommend.assert_not_called()
+    client.close()
+    assert read_json(tmp_path / "session/report.json")["samples"] == 1
+    assert (
+        read_json(tmp_path / "session/samples/000001.json")["decision"]["status"] == "invalid_state"
+    )
+    from rift_research.session_audit import audit_session
+
+    audit = audit_session(tmp_path / "session", tmp_path / "audit")
+    assert audit["mode_mismatch"] and not audit["game_end_observed"]
+    assert audit["self_reported_outcome"] is None
+    assert audit["voluntary_dominant_fraction"] == 0

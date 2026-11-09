@@ -1,7 +1,7 @@
 """Weak, interval-based executed-option reconstruction. No claim of inferred intent."""
 
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -13,6 +13,72 @@ from rift_common.objectives import PITS
 class Behavior:
     action: int
     evidence: str
+
+
+@dataclass(frozen=True)
+class ActivityEvidence:
+    representative: Behavior
+    candidates: tuple[int, ...]
+    identified: bool
+    death_participation: bool = False
+    combat_credit: bool = False
+
+
+def player_activity(start, end, player_id):
+    """Preserve overlapping observations; death participation never identifies fight intent."""
+    representative = player_behavior(start, end, player_id)
+    if representative is None:
+        return None
+    if representative.action != Action.SKIRMISH:
+        return ActivityEvidence(representative, (int(representative.action),), True)
+    events = [
+        e for e in end.events if e.get("kind") == "kill" and start.time < e["time"] <= end.time
+    ]
+    died = any(e.get("victim") == str(player_id) for e in events)
+    credited = any(
+        e.get("actor") == str(player_id) or str(player_id) in e.get("assists", []) for e in events
+    )
+    other = player_behavior(
+        start,
+        replace(end, events=tuple(e for e in end.events if e.get("kind") != "kill")),
+        player_id,
+    )
+    candidates = {int(Action.SKIRMISH)}
+    # Removing a death event must never invent a voluntary return to base.
+    if (
+        other is not None
+        and other.action != Action.CONTINUE
+        and not (died and other.action == Action.RESET)
+    ):
+        candidates.add(int(other.action))
+    return ActivityEvidence(
+        representative,
+        tuple(sorted(candidates)),
+        len(candidates) == 1 and not (died and not credited),
+        died,
+        credited,
+    )
+
+
+def team_activity(start, end, team):
+    representative = team_behavior(start, end, team)
+    players = [player_activity(start, end, p.id) for p in start.players if p.team == team]
+    if representative is None or any(p is None for p in players):
+        return None
+    # Only coherent executed macro options identify a target. No consensus is
+    # unresolved, not a positive "continue" strategy. Combat does not identify intent.
+    identified = (
+        representative.action not in {Action.CONTINUE, Action.SKIRMISH}
+        and sum(p.identified and p.representative.action == representative.action for p in players)
+        >= 3
+    )
+    return ActivityEvidence(
+        representative,
+        (int(representative.action),),
+        identified,
+        any(p.death_participation for p in players),
+        any(p.combat_credit for p in players),
+    )
 
 
 def distance(a, b):

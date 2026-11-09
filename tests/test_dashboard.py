@@ -9,6 +9,7 @@ import pytest
 from offline_rift.inference.live_client import LiveClientUnavailable, LiveStateAdapter
 from offline_rift.ui.server import DashboardServer
 from offline_rift.ui.service import LiveDashboard
+from rift_common.metrics import behavior_metrics
 from test_live import live_data
 
 
@@ -23,6 +24,7 @@ def dashboard(monkeypatch):
     client.source.transport = "local"
     client.adapter = LiveStateAdapter()
     client.fetch_live_data.return_value = live_data()
+    client.observe_once.side_effect = lambda: client.adapter.snapshot(client.fetch_live_data())
     client.policy.name = "test-policy"
     client.policy.metadata = {
         "algorithm": "cql",
@@ -67,6 +69,20 @@ def test_subject_changes_share_snapshot_but_not_cached_advice(dashboard):
     clock[0] = 22
     service.client.fetch_live_data.side_effect = None
     assert service.state()["status"] == "live"
+
+
+def test_adc_profile_dashboard_uses_adc_metrics_and_adc_training_majority(dashboard):
+    service, _ = dashboard
+    metadata = service.client.policy.metadata
+    metadata["advisory_groups"] = ["BOTTOM"]
+    report = metadata["training_report"]
+    report["per_group"]["BOTTOM"] = behavior_metrics([3, 3, 3, 12], [3, 3, -1, 12], 15)
+    report["counts_by_group"] = [[1] * 15 for _ in range(7)]
+    report["counts_by_group"][3][3] = 100
+    scoped = LiveDashboard(service.client)
+    assert scoped.model["behavior_agreement"] == 0.75
+    assert scoped.model["majority_baseline"] == 0.75
+    assert scoped.model["advisory_groups"] == ["BOTTOM"]
 
 
 def test_local_read_only_api_validates_context_and_keeps_assets_local(dashboard):

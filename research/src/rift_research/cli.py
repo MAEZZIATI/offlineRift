@@ -21,13 +21,37 @@ def main():
     evaluate.add_argument("--bundle", type=Path, required=True)
     evaluate.add_argument("--output", type=Path, required=True)
     evaluate.add_argument("--bootstrap-samples", type=int, default=500)
+    evaluate.add_argument(
+        "--stress",
+        action="store_true",
+        help="Also diagnose controlled missing-health/history inputs",
+    )
+    evaluate.add_argument(
+        "--new-matches",
+        action="store_true",
+        help="Evaluate only matches absent from this frozen model's training/development corpus",
+    )
     study = sub.add_parser("study", help="Run matched-split CQL/IQL/imitation comparisons")
     study.add_argument("--config", type=Path, default=Path("workflow.json"))
     study.add_argument("--output", type=Path, required=True)
     study.add_argument("--steps", type=int, default=10000)
     study.add_argument("--seeds", type=int, nargs="+", default=[42, 43])
     study.add_argument("--bootstrap-samples", type=int, default=500)
-    study.add_argument("--suite", choices=("algorithms", "robustness"), default="algorithms")
+    study.add_argument(
+        "--suite",
+        choices=("algorithms", "robustness", "readiness", "evidence", "evidence-low-alpha"),
+        default="algorithms",
+    )
+    study.add_argument(
+        "--holdout-manifest",
+        type=Path,
+        help="JSON with match_ids reserved from fitting and development",
+    )
+    study.add_argument(
+        "--corpus-manifest",
+        type=Path,
+        help="Freeze the exact raw match-ID membership for this study",
+    )
     sensitivity = sub.add_parser(
         "sensitivity", help="Check optimizer-seed and missing-state stability"
     )
@@ -55,7 +79,60 @@ def main():
     )
     regret.add_argument("--study", type=Path, required=True)
     regret.add_argument("--output", type=Path, required=True)
+    session = sub.add_parser("audit-session", help="Audit measured opt-in live samples and advice")
+    session.add_argument("--session", type=Path, required=True)
+    session.add_argument("--output", type=Path, required=True)
+    session.add_argument("--reported-outcome", choices=("win", "loss"))
+    adherence = sub.add_parser(
+        "adherence",
+        help="Review observed activity after served advice; unresolved actions remain explicit",
+    )
+    adherence.add_argument("--session", type=Path, required=True)
+    adherence.add_argument("--output", type=Path, required=True)
+    adherence.add_argument(
+        "--match",
+        type=Path,
+        help="Optional cached match/timeline JSON; roster and game clock must match",
+    )
+    synthesis = sub.add_parser(
+        "synthesize",
+        help="Generate the current six-policy Markdown/PDF from completed offline artifacts",
+    )
+    synthesis.add_argument("--study", type=Path, required=True)
+    synthesis.add_argument("--evaluation", type=Path, required=True)
+    synthesis.add_argument("--output", type=Path, default=Path("research/docs/SYNTHESIS.pdf"))
     args = parser.parse_args()
+    if args.command == "synthesize":
+        from rift_research.reporting import synthesize
+
+        print(json.dumps(synthesize(args.study, args.evaluation, args.output)))
+        return
+    if args.command == "adherence":
+        from rift_research.adherence import review_adherence
+
+        report = review_adherence(args.session, args.output, match=args.match)
+        print(json.dumps({"status": report["status"], "counts": report["counts"]}))
+        return
+    if args.command == "audit-session":
+        from rift_research.session_audit import audit_session
+
+        report = audit_session(args.session, args.output, reported_outcome=args.reported_outcome)
+        print(
+            json.dumps(
+                {
+                    key: report[key]
+                    for key in (
+                        "status",
+                        "samples",
+                        "game_modes",
+                        "mode_mismatch",
+                        "voluntary_dominant_fraction",
+                        "self_reported_outcome",
+                    )
+                }
+            )
+        )
+        return
     if args.command == "decision-regret":
         from rift_research.decision_regret import study_decision_regret
 
@@ -92,12 +169,25 @@ def main():
             seeds=tuple(args.seeds),
             samples=args.bootstrap_samples,
             suite=args.suite,
+            holdout_matches=json.loads(args.holdout_manifest.read_text())["match_ids"]
+            if args.holdout_manifest
+            else (),
+            corpus_matches=json.loads(args.corpus_manifest.read_text())["match_ids"]
+            if args.corpus_manifest
+            else None,
         )
         print(json.dumps({"status": report["status"], "runs": len(report["runs"])}))
         return
     report = (
         describe_dataset(args.dataset)
         if args.command == "dataset"
-        else evaluate_policy(args.dataset, args.bundle, args.output, samples=args.bootstrap_samples)
+        else evaluate_policy(
+            args.dataset,
+            args.bundle,
+            args.output,
+            samples=args.bootstrap_samples,
+            new_matches=args.new_matches,
+            stress=args.stress,
+        )
     )
     print(json.dumps(report, indent=2))

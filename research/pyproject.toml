@@ -14,3 +14,6 @@ rift-research = "rift_research.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"rift_research" = ["protocol.json"]

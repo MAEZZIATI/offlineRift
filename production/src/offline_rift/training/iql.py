@@ -41,7 +41,7 @@ class IQLUpdate:
             raise RuntimeError("Non-finite IQL optimizer loss")
         optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(parameters, 5)
+        torch.nn.utils.clip_grad_norm_(parameters, 5, error_if_nonfinite=True)
         optimizer.step()
 
     def step(self, batch):

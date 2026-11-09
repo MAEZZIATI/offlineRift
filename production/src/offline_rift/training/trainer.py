@@ -1,6 +1,7 @@
 """Explicit-transition CQL, discrete IQL and imitation with measured-time discount."""
 
 import copy
+import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -10,13 +11,14 @@ from rift_common import network as network_contract
 from rift_common import observation_masks
 from rift_common.actions import ACTION_NAMES, GROUPS
 from rift_common.artifacts import atomic_json, file_digest, write_bundle_manifest
-from rift_common.dataset import load_dataset
+from rift_common.dataset import episode_returns, load_dataset
 from rift_common.metrics import behavior_metrics
-from rift_common.network import OptionNetwork, bellman_target, rank_options
+from rift_common.network import OptionNetwork, rank_options
 from torch.nn import functional as F
 
 from offline_rift.training import augmentation
 from offline_rift.training.augmentation import ObservationAugmenter
+from offline_rift.training.targets import critic_targets
 
 
 @dataclass(frozen=True)
@@ -40,10 +42,43 @@ class TrainConfig:
     target_tau: float = 0.005
     joint_history_dropout: float = 0.0
     bounded_values: bool = False
+    target_mode: str = "identified"
+    minimum_score_gap: float = 0.0
+    holdout_matches: tuple[str, ...] = ()
+    advisory_groups: tuple[str, ...] = GROUPS
+    training_groups: tuple[str, ...] = GROUPS
+    critic_target: str = "td"
 
     def __post_init__(self):
+        for name in ("steps", "batch_size", "seed", "minimum_support", "cpu_threads"):
+            if type(getattr(self, name)) is not int:
+                raise ValueError("Invalid training configuration: integer settings required")
+        if self.split_seed is not None and type(self.split_seed) is not int:
+            raise ValueError("Invalid training configuration: split seed must be an integer")
+        for name in (
+            "learning_rate",
+            "alpha",
+            "gamma",
+            "validation_fraction",
+            "behavior_floor",
+            "expectile",
+            "advantage_temperature",
+            "advantage_clip",
+            "target_tau",
+            "joint_history_dropout",
+            "minimum_score_gap",
+        ):
+            if not math.isfinite(getattr(self, name)):
+                raise ValueError("Invalid training configuration: finite settings required")
         if (
             self.algorithm not in {"cql", "bc", "iql"}
+            or self.target_mode not in {"identified", "representative"}
+            or self.critic_target not in {"td", "episode_return"}
+            or self.minimum_score_gap < 0
+            or not self.advisory_groups
+            or any(group not in GROUPS for group in self.advisory_groups)
+            or not self.training_groups
+            or any(group not in GROUPS for group in self.training_groups)
             or self.steps < 1
             or self.batch_size < 1
             or self.cpu_threads < 1
@@ -82,7 +117,14 @@ def predict(network, observations, groups, masks, counts, config):
                 algorithm=config.algorithm,
                 minimum_support=config.minimum_support,
                 behavior_floor=config.behavior_floor,
+                minimum_score_gap=config.minimum_score_gap,
             )
+            p[
+                ~np.isin(
+                    groups[start : start + 1024],
+                    [GROUPS.index(group) for group in config.advisory_groups],
+                )
+            ] = -1
             predictions.append(p)
             values.append(q.cpu().numpy())
     return np.concatenate(predictions), np.concatenate(values)
@@ -95,7 +137,8 @@ class PolicyTrainer:
     def train(self, dataset, output):
         config = self.config
         arrays, metadata = load_dataset(dataset)
-        matches = np.unique(arrays["match_ids"])
+        holdout = np.isin(arrays["match_ids"], config.holdout_matches)
+        matches = np.unique(arrays["match_ids"][~holdout])
         if len(matches) < 2:
             raise ValueError("At least two independent matches are required")
         rng = np.random.default_rng(config.seed)
@@ -108,7 +151,18 @@ class PolicyTrainer:
             rng = split_rng
         count = max(1, int(len(matches) * config.validation_fraction))
         validation = np.isin(arrays["match_ids"], matches[:count])
-        rows = np.flatnonzero(~validation)
+        identified = arrays.get("action_identified", np.ones(len(arrays["actions"]), dtype=bool))
+        eligible = (
+            identified
+            if config.target_mode == "identified"
+            else np.ones(len(identified), dtype=bool)
+        )
+        training_scope = np.isin(
+            arrays["groups"], [GROUPS.index(group) for group in config.training_groups]
+        )
+        rows = np.flatnonzero(~validation & ~holdout & eligible & training_scope)
+        if not len(rows):
+            raise ValueError("No identified training transitions")
         counts = np.zeros((len(GROUPS), len(ACTION_NAMES)), dtype=np.int64)
         np.add.at(counts, (arrays["groups"][rows], arrays["actions"][rows]), 1)
         output = Path(output)
@@ -120,12 +174,14 @@ class PolicyTrainer:
             "dataset_path": str(Path(dataset).resolve()),
             "training_matches": matches[count:].tolist(),
             "validation_matches": matches[:count].tolist(),
+            "holdout_matches": sorted(set(arrays["match_ids"][holdout])),
             "stage": "experimental_next_action_policy",
             "source_sha256": {
                 "trainer": file_digest(__file__),
                 "network": file_digest(network_contract.__file__),
                 "augmentation": file_digest(augmentation.__file__),
                 "observation_masks": file_digest(observation_masks.__file__),
+                "targets": file_digest(Path(__file__).with_name("targets.py")),
             },
         }
         if config.algorithm == "iql":
@@ -162,6 +218,7 @@ class PolicyTrainer:
                     "next_action_masks",
                 )
             }
+            tensors["episode_returns"] = torch.as_tensor(episode_returns(arrays, config.gamma))
             support = torch.as_tensor(counts >= config.minimum_support, device=config.device)
             class_counts = counts.sum(axis=0)
             weights = np.zeros(len(ACTION_NAMES), dtype=np.float32)
@@ -195,28 +252,7 @@ class PolicyTrainer:
                     weight=class_weights,
                 )
                 if config.algorithm == "cql":
-                    with torch.no_grad():
-                        online, _ = network(batch["next_observations"])
-                        future, future_behavior = target(batch["next_observations"])
-                        legal = batch["next_action_masks"] & support[batch["groups"]]
-                        legal &= (
-                            future_behavior.masked_fill(~batch["next_action_masks"], -1e9).softmax(
-                                1
-                            )
-                            >= config.behavior_floor
-                        )
-                        next_action = online.masked_fill(~legal, -1e9).argmax(1)
-                        next_value = future.gather(1, next_action[:, None]).squeeze(1)
-                        next_value = torch.where(
-                            legal.any(1), next_value, torch.full_like(next_value, -1)
-                        )
-                        targets = bellman_target(
-                            batch["rewards"],
-                            batch["terminals"],
-                            batch["durations"],
-                            next_value,
-                            config.gamma,
-                        )
+                    targets = critic_targets(network, target, batch, support, config)
                     td_loss = F.smooth_l1_loss(observed, targets)
                     conservative = (
                         torch.logsumexp(q.masked_fill(~batch["action_masks"], -1e9), 1) - observed
@@ -229,7 +265,7 @@ class PolicyTrainer:
                     raise RuntimeError("Non-finite optimizer loss")
                 optimizer.zero_grad()
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(network.parameters(), 5)
+                torch.nn.utils.clip_grad_norm_(network.parameters(), 5, error_if_nonfinite=True)
                 optimizer.step()
                 if step % 200 == 0:
                     target.load_state_dict(network.state_dict())
@@ -258,7 +294,22 @@ class PolicyTrainer:
             report = {
                 "training_matches": matches[count:].tolist(),
                 "validation_matches": matches[:count].tolist(),
-                "training_transitions": int((~validation).sum()),
+                "training_transitions": len(rows),
+                "retained_training_transitions": int(
+                    (~validation & ~holdout & training_scope).sum()
+                ),
+                "stored_training_transitions": int((~validation & ~holdout).sum()),
+                "critic_target": config.critic_target,
+                "excluded_ambiguous_training_updates": int(
+                    (~validation & ~holdout & ~eligible & training_scope).sum()
+                ),
+                "identified_validation": behavior_metrics(
+                    truth[identified[selected]], predicted[identified[selected]], len(ACTION_NAMES)
+                )
+                if identified[selected].any()
+                else None,
+                "identified_training_terminal_rows": int(np.sum(arrays["terminals"][rows])),
+                "holdout_matches": sorted(set(arrays["match_ids"][holdout])),
                 "validation_transitions": int(validation.sum()),
                 "optimizer_steps": config.steps,
                 "counts_by_group": counts.tolist(),
@@ -298,9 +349,23 @@ class PolicyTrainer:
                 else "shared_v1",
                 train_config=asdict(config),
                 training_report=report,
+                dataset_sha256=run["dataset_sha256"],
+                advisory_groups=list(config.advisory_groups),
             )
             atomic_json(output / "metadata.json", metadata)
             write_bundle_manifest(output, ("metadata.json", "policy.pt"))
+            # Completion requires the actual serving loader and held-out prediction parity.
+            from offline_rift.inference.policy import NextActionPolicy
+
+            reloaded = NextActionPolicy(output, device=config.device)
+            restored, _ = reloaded.predict_batch(
+                arrays["observations"][selected],
+                arrays["groups"][selected],
+                arrays["action_masks"][selected],
+            )
+            if not np.array_equal(predicted, restored):
+                raise RuntimeError("Saved policy failed serving prediction parity")
+            run["serving_reload_verified"] = True
             run.update(status="complete", report=report)
             return run
         except BaseException as error:

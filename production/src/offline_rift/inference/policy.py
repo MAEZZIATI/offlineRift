@@ -7,6 +7,7 @@ import torch
 from rift_common.actions import (
     ACTION_NAMES,
     ACTION_SCHEMA,
+    GROUPS,
     ROLES,
     Action,
     action_catalog,
@@ -40,6 +41,9 @@ class NextActionPolicy:
         ):
             raise ValueError("Model contract mismatch")
         self.device = device
+        self.advisory_groups = tuple(self.metadata.get("advisory_groups", GROUPS))
+        if not self.advisory_groups or any(group not in GROUPS for group in self.advisory_groups):
+            raise ValueError("Invalid advisory scope")
         self.algorithm = self.metadata["algorithm"]
         architecture = self.metadata.get("network_architecture", "shared_v1")
         bounded = self.metadata["train_config"].get("bounded_values", False)
@@ -60,20 +64,38 @@ class NextActionPolicy:
         self.network.load_state_dict(
             torch.load(directory / "policy.pt", map_location=device, weights_only=True)
         )
+        if any(not torch.isfinite(value).all() for value in self.network.state_dict().values()):
+            raise ValueError("Non-finite model parameters")
         self.network.eval()
         self.config = self.metadata["train_config"]
         self.counts = np.asarray(self.metadata["training_report"]["counts_by_group"])
-        if self.counts.shape != (7, len(Action)) or np.any(self.counts < 0):
+        if (
+            self.counts.shape != (len(GROUPS), len(Action))
+            or self.counts.dtype.kind not in "iu"
+            or np.any(self.counts < 0)
+            or type(self.config["minimum_support"]) is not int
+            or self.config["minimum_support"] < 1
+            or not 0 <= self.config["behavior_floor"] < 1
+        ):
             raise ValueError("Invalid model support contract")
 
     def predict_batch(self, observations, groups, masks):
         observed = np.asarray(observations, dtype=np.float32)
+        groups, masks = np.asarray(groups), np.asarray(masks)
         if (
             observed.ndim != 2
             or observed.shape[1] != len(self.encoder.names)
             or not np.isfinite(observed).all()
+            or groups.shape != (len(observed),)
+            or groups.dtype.kind not in "iu"
+            or np.any((groups < 0) | (groups >= len(GROUPS)))
+            or masks.dtype != bool
+            or masks.shape != (len(observed), len(Action))
+            or not np.array_equal(masks, feasible_actions(observed, self.encoder.names))
         ):
             raise ValueError("Invalid policy observation")
+        if not len(observed):
+            return np.empty(0, dtype=np.int64), np.empty((0, len(Action)), dtype=np.float32)
         predicted = []
         scores = []
         with torch.inference_mode():
@@ -90,7 +112,14 @@ class NextActionPolicy:
                     algorithm=self.algorithm,
                     minimum_support=self.config["minimum_support"],
                     behavior_floor=self.config["behavior_floor"],
+                    minimum_score_gap=self.config.get("minimum_score_gap", 0),
                 )
+                outside_scope = ~np.isin(
+                    groups[start : start + 1024],
+                    [GROUPS.index(group) for group in self.advisory_groups],
+                )
+                p[outside_scope] = -1
+                s[outside_scope] = -np.inf
                 predicted.append(p)
                 scores.append(s)
         return np.concatenate(predicted), np.concatenate(scores)
@@ -120,6 +149,13 @@ class NextActionPolicy:
                 "status": "opening",
                 "message": "Follow your opening plan. The learned decision window starts after 90 seconds.",
             }
+        if ("TEAM" if actor is None else role) not in self.advisory_groups:
+            return {
+                **context,
+                "status": "insufficient_support",
+                "message": "This experimental candidate is enabled only for: "
+                + ", ".join(self.advisory_groups),
+            }
         state = self.encoder.encode(current, team, actor, role=role, previous=previous)
         masks = feasible_actions(state, self.encoder.names)
         group = group_index(actor is None, role)
@@ -146,5 +182,6 @@ class NextActionPolicy:
             if self.algorithm == "iql"
             else "behavior-support logit; not a win probability",
             "method": self.algorithm,
+            "critic_target": self.config.get("critic_target", "td"),
             "partial_observation": True,
         }

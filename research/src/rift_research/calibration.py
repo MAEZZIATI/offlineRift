@@ -215,7 +215,7 @@ def calibrate_coverage(study, output, *, targets=(1.0, 0.9, 0.75, 0.5), conditio
         "source_study_sha256": file_digest(study / "study.json"),
         "source_sha256": file_digest(__file__),
         "observation_masks_sha256": file_digest(observation_masks.__file__),
-        "protocol_sha256": file_digest(Path(__file__).parents[2] / "docs/NEXT_STUDY_PROTOCOL.md")
+        "protocol_sha256": file_digest(Path(__file__).with_name("protocol.json"))
         if conditional_evidence
         else None,
         "dataset_sha256": source["dataset_sha256"],

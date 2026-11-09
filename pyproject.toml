@@ -13,6 +13,7 @@ dependencies = ["numpy>=1.26,<3", "requests>=2.31,<3"]
 inference = ["torch>=2.5,<3"]
 train = ["torch>=2.5,<3"]
 dev = ["pytest>=8,<9", "ruff>=0.9"]
+docs = ["matplotlib>=3.9,<4", "reportlab>=4,<6", "pymupdf>=1.26,<3"]
 
 [project.scripts]
 rift-train = "offline_rift.training.trainer:main"

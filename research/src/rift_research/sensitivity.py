@@ -80,14 +80,27 @@ def analyze_study(study, output):
             for scenario, fields in scenarios.items():
                 observed = states.copy()
                 observed[:, [names.index(field) for field in fields]] = 0
-                predicted, _ = policy.predict_batch(
-                    observed, groups, feasible_actions(observed, names)
-                )
+                omitted_masks = feasible_actions(observed, names)
+                predicted, _ = policy.predict_batch(observed, groups, omitted_masks)
+                infeasible_targets = ~omitted_masks[np.arange(len(truth)), truth]
                 result["scenarios"][scenario] = {
                     "disagreement": float(np.mean(baseline != predicted)),
                     "metrics": behavior_metrics(truth, predicted, len(ACTION_NAMES)),
                     "per_group_disagreement": {
                         group: float(np.mean(baseline[groups == i] != predicted[groups == i]))
+                        for i, group in enumerate(GROUPS)
+                        if np.any(groups == i)
+                    },
+                    "per_group": {
+                        group: {
+                            **behavior_metrics(
+                                truth[groups == i], predicted[groups == i], len(ACTION_NAMES)
+                            ),
+                            "targets_made_infeasible": np.bincount(
+                                truth[(groups == i) & infeasible_targets],
+                                minlength=len(ACTION_NAMES),
+                            ).tolist(),
+                        }
                         for i, group in enumerate(GROUPS)
                         if np.any(groups == i)
                     },
@@ -113,6 +126,33 @@ def analyze_study(study, output):
                 }
                 for seed in seeds[1:]
             }
+        if source.get("suite") == "readiness":
+            originals = {run["name"]: run for run in source["runs"]}
+            stressed = {run["name"]: run for run in report["runs"]}
+            report["development_screen"] = {}
+            for variant in source["variants"]:
+                if not variant.startswith("cql-bounded-joint"):
+                    continue
+                failures = []
+                for seed in source["optimizer_seeds"]:
+                    name = f"{variant}-seed-{seed}"
+                    original = originals[name]
+                    if stressed[name]["scenarios"]["cold_start_history"]["disagreement"] > 0.2:
+                        failures.append(f"Seed {seed}: history-removal disagreement exceeds 20%")
+                    for group, metrics in original["per_group"].items():
+                        if metrics["largest_prediction_fraction"] > 0.8:
+                            failures.append(f"Seed {seed}: {group} concentration exceeds 80%")
+                    reference = originals[f"cql-alpha-0.1-seed-{seed}"]
+                    if (
+                        original["metrics"]["prediction_coverage"]
+                        < reference["metrics"]["prediction_coverage"]
+                    ):
+                        failures.append(f"Seed {seed}: action diversity below ordinary CQL")
+                report["development_screen"][variant] = {
+                    "passed": not failures,
+                    "failures": failures,
+                    "production_strategy_validated": False,
+                }
         report["status"] = "complete"
         return report
     except BaseException as error:

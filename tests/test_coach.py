@@ -1,0 +1,107 @@
+import numpy as np
+import pytest
+from offline_rift.inference.advice import AdviceController
+from offline_rift.inference.coach import MacroCoach
+from offline_rift.training.coach import train_coach
+from rift_common.artifacts import read_json
+from rift_common.behavior import team_activity
+from rift_common.coaching import POLICY_SCOPES, alignment
+from rift_common.dataset import DatasetBuilder, episode_returns, load_dataset
+from rift_common.timeline import read_match
+
+
+def macro_match(factory, name):
+    match, timeline = factory(name)
+    for player in (2, 3, 4, 7, 8, 9):
+        timeline["info"]["frames"][3]["participantFrames"][str(player)]["position"] = {
+            "x": 1400,
+            "y": 11000,
+        }
+    return match, timeline
+
+
+def test_macro_requires_coherent_executed_evidence_not_formation_fallback(match_payloads):
+    observations = read_match(*macro_match(match_payloads, "KR_macro"))
+    assert not team_activity(observations[1], observations[2], 100).identified
+    evidence = team_activity(observations[2], observations[3], 100)
+    assert evidence.identified and evidence.representative.action == 5
+    assert (
+        alignment(
+            {"status": "recommendation", "action_id": 8},
+            {"status": "recommendation", "action_id": 9},
+        )
+        == "conflict"
+    )
+
+
+def test_retained_role_advice_uses_fresh_macro_direction_and_rechecks_alignment():
+    controller = AdviceController()
+    first = {
+        "status": "recommendation",
+        "action_id": 3,
+        "team": 100,
+        "actor": "p",
+        "role": "BOTTOM",
+        "game_time": 100,
+        "scores": [0.1] * 15,
+        "macro_recommendation": {"status": "recommendation", "action_id": 8},
+        "coordination": {"status": "independent"},
+    }
+    controller.select(first)
+    changed = {
+        **first,
+        "action_id": 6,
+        "game_time": 105,
+        "macro_recommendation": {"status": "recommendation", "action_id": 6},
+        "coordination": {"status": "aligned"},
+    }
+    result = controller.select(changed)
+    assert result["action_id"] == 3
+    assert result["macro_recommendation"]["action_id"] == 6
+    assert result["coordination"]["status"] == "independent"
+
+
+def test_six_real_models_are_scope_trained_reload_route_and_detect_corruption(
+    tmp_path, match_payloads, catalog
+):
+    builder = DatasetBuilder()
+    for i in range(4):
+        builder.add_match(*macro_match(match_payloads, f"KR_{i}"), catalog)
+    path = tmp_path / "data.npz"
+    builder.save(path, catalog=catalog, provenance={"fingerprint": "fixture"})
+    result = train_coach(path, tmp_path / "coach", steps=1, holdout_matches=("KR_3",))
+    assert result["status"] == "complete" and set(result["selected"]) == set(POLICY_SCOPES)
+    coach = MacroCoach(result["bundle"])
+    arrays, _ = load_dataset(path)
+    predictions, _ = coach.predict_batch(
+        arrays["observations"], arrays["groups"], arrays["action_masks"]
+    )
+    for scope, policy in coach.policies.items():
+        assert policy.config["training_groups"] == [scope]
+        other_groups = [
+            i
+            for i, name in enumerate(
+                ("TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY", "UNKNOWN", "TEAM")
+            )
+            if name != scope
+        ]
+        assert not policy.counts[other_groups].any()
+        assert policy.metadata["training_report"]["holdout_matches"] == ["KR_3"]
+        assert not any(
+            "KR_3" in policy.metadata["training_report"][k]
+            for k in ("training_matches", "validation_matches")
+        )
+    returns = episode_returns(arrays, 0.9)
+    np.testing.assert_array_equal(
+        returns[arrays["terminals"]], arrays["rewards"][arrays["terminals"]]
+    )
+    assert predictions.shape == arrays["actions"].shape
+    terminal = np.flatnonzero(arrays["terminals"])[0]
+    assert returns[terminal - 1] == pytest.approx(0.9 * returns[terminal])
+    manifest = read_json(tmp_path / "coach/model/coach.json")
+    assert len(manifest["policies"]) == 6
+    assert coach.metadata["training_report"]["optimizer_steps"] == 6
+    with (tmp_path / "coach/model/policies/TOP/policy.pt").open("ab") as stream:
+        stream.write(b"invalid")
+    with pytest.raises(ValueError, match="integrity"):
+        MacroCoach(result["bundle"])

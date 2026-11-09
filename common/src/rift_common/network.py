@@ -3,7 +3,7 @@
 import torch
 from torch import nn
 
-from rift_common.actions import Action
+from rift_common.actions import GROUPS, Action
 
 
 class OptionNetwork(nn.Module):
@@ -36,19 +36,49 @@ def action_support(counts, groups, masks, minimum=20):
 
 def bellman_target(rewards, terminals, durations, next_values, gamma):
     """Elapsed-time discount; terminal transitions never bootstrap."""
-    return rewards + (~terminals).float() * torch.pow(gamma, durations / 60) * next_values
+    continuation = torch.where(terminals, torch.zeros_like(next_values), next_values)
+    return rewards + torch.pow(gamma, durations / 60) * continuation
 
 
 def rank_options(
-    values, logits, counts, groups, masks, *, algorithm, minimum_support=20, behavior_floor=0.02
+    values,
+    logits,
+    counts,
+    groups,
+    masks,
+    *,
+    algorithm,
+    minimum_support=20,
+    behavior_floor=0.02,
+    minimum_score_gap=0.0,
 ):
     import numpy as np
 
     if algorithm not in {"cql", "bc", "iql"}:
         raise ValueError("Unknown policy algorithm")
-    allowed = action_support(
-        np.asarray(counts), np.asarray(groups), np.asarray(masks), minimum_support
-    )
+    values, logits, counts, groups, masks = map(np.asarray, (values, logits, counts, groups, masks))
+    if (
+        values.ndim != 2
+        or values.shape[1] != len(Action)
+        or logits.shape != values.shape
+        or masks.shape != values.shape
+        or masks.dtype != bool
+        or groups.shape != (len(values),)
+        or groups.dtype.kind not in "iu"
+        or np.any((groups < 0) | (groups >= len(GROUPS)))
+        or counts.shape != (len(GROUPS), len(Action))
+        or counts.dtype.kind not in "iu"
+        or np.any(counts < 0)
+        or not np.isfinite(values).all()
+        or not np.isfinite(logits).all()
+        or not isinstance(minimum_support, int)
+        or minimum_support < 1
+        or not 0 <= behavior_floor < 1
+        or not np.isfinite(minimum_score_gap)
+        or minimum_score_gap < 0
+    ):
+        raise ValueError("Invalid policy ranking contract")
+    allowed = action_support(counts, groups, masks, minimum_support)
     # A learned behavior-support constraint is distinct from a win probability.
     eligible_logits = np.where(masks, logits, -1e9)
     shifted = eligible_logits - np.max(eligible_logits, axis=1, keepdims=True)
@@ -59,4 +89,10 @@ def rank_options(
     scores = np.where(allowed, scores, -np.inf)
     predicted = scores.argmax(axis=1)
     predicted[~allowed.any(axis=1)] = -1
+    if minimum_score_gap > 0:
+        ordered = np.sort(scores, axis=1)
+        competing = allowed.sum(1) > 1
+        gaps = np.full(len(scores), np.inf)
+        gaps[competing] = ordered[competing, -1] - ordered[competing, -2]
+        predicted[gaps < minimum_score_gap] = -1
     return predicted, scores, allowed

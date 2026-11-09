@@ -11,7 +11,7 @@ from rift_common.actions import ROLES
 from rift_common.objectives import ObjectiveRules, ObjectiveTracker
 from rift_common.state import Observation, PlayerState
 
-from offline_rift.inference.policy import NextActionPolicy
+from offline_rift.inference.coach import load_policy
 from offline_rift.inference.transport import DEFAULT_ENDPOINT, LiveClientUnavailable, LiveDataSource
 
 
@@ -41,6 +41,10 @@ class LiveStateAdapter:
             or timestamp < 0
         ):
             raise ValueError("An active 5v5 Summoner’s Rift observation is required")
+        if game.get("gameMode") not in (None, "CLASSIC"):
+            raise ValueError(
+                "Policy advice is unavailable for this game mode; training covers ranked Classic only"
+            )
         identities = {}
         prepared = []
         for p in raw:
@@ -72,17 +76,19 @@ class LiveStateAdapter:
         raw_events = sorted(
             data.get("events", {}).get("Events", []), key=lambda e: e.get("EventTime", 0)
         )
-        complete = timestamp < 60 or any(
-            e.get("EventName") == "GameStart"
-            or (e.get("EventID") == 0 and float(e.get("EventTime", 999)) <= 60)
-            for e in raw_events
-        )
+        complete = timestamp < 60
         for event in raw_events:
             moment = float(event.get("EventTime", 0))
             if not math.isfinite(moment) or moment < 0:
                 raise ValueError("Invalid event clock")
             if moment > timestamp:
                 continue
+            if event.get("EventName") == "GameEnd":
+                raise ValueError("Game has ended; waiting for an active game")
+            if event.get("EventName") == "GameStart" or (
+                event.get("EventID") == 0 and moment <= 60
+            ):
+                complete = True
             killer = identities.get(event.get("KillerName"), set())
             identity, team = next(iter(killer)) if len(killer) == 1 else (None, None)
             kind = event.get("EventName")
@@ -181,6 +187,7 @@ class LiveClientInference:
         timeout=3,
         verify_tls=False,
         capture_availability=None,
+        capture_session=None,
     ):
         if team not in (100, 200) or not math.isfinite(interval_seconds) or interval_seconds <= 0:
             raise ValueError("Invalid team or polling interval")
@@ -188,16 +195,26 @@ class LiveClientInference:
             endpoint, timeout=timeout, verify_tls=verify_tls, transport=transport, session=session
         )
         try:
-            self.policy = policy or NextActionPolicy(model_dir)
+            self.policy = policy or load_policy(model_dir)
             self.capture = None
+            self.session_capture = None
             if capture_availability is not None:
                 from offline_rift.inference.availability import AvailabilityCapture
 
                 self.capture = AvailabilityCapture(capture_availability)
+            if capture_session is not None:
+                from offline_rift.inference.session import SessionCapture
+
+                self.session_capture = SessionCapture(
+                    capture_session, model=model_dir, team=team, actor=actor, role=role
+                )
         except Exception:
             self.source.close()
             raise
         self.adapter = LiveStateAdapter()
+        from offline_rift.inference.advice import AdviceController
+
+        self.advice = AdviceController()
         self.team, self.actor, self.role, self.interval_seconds = (
             team,
             actor,
@@ -209,6 +226,16 @@ class LiveClientInference:
         return self.source.fetch()
 
     def recommend(self, snapshot, team, actor="active", role=None):
+        if actor.startswith("champion:"):
+            champion = actor.split(":", 1)[1]
+            matches = [
+                p
+                for p in snapshot.players
+                if p.team == team and p.champion.casefold() == champion.casefold()
+            ]
+            if len(matches) != 1:
+                raise ValueError("Selected champion is not uniquely present on the selected team")
+            actor = matches[0].id
         if actor == "active":
             if snapshot.active_player is None:
                 if self.capture is not None:
@@ -227,13 +254,46 @@ class LiveClientInference:
             self.capture.record(
                 snapshot, self.adapter.previous, self.policy.encoder, team, actor, role
             )
-        return self.policy.recommend(
+        result = self.policy.recommend(
             snapshot, team, actor, role=role, previous=self.adapter.previous
         )
+        if isinstance(result, dict):
+            if "macro_recommendation" in result:
+                from rift_common.coaching import alignment
+
+                result["macro_recommendation"] = self.advice.select(result["macro_recommendation"])
+                result["coordination"]["status"] = alignment(result["macro_recommendation"], result)
+            result = self.advice.select(result)
+        if self.session_capture is not None:
+            observed = self.policy.encoder.encode(
+                snapshot, team, actor, role=role, previous=self.adapter.previous
+            )
+            self.session_capture.decision(
+                result, observation=observed, feature_names=self.policy.encoder.names
+            )
+        return result
+
+    def observe_once(self):
+        data = self.fetch_live_data()
+        if self.session_capture is not None:
+            if self.actor.startswith("champion:"):
+                champion = self.actor.split(":", 1)[1].casefold()
+                side = "ORDER" if self.team == 100 else "CHAOS"
+                if not any(
+                    p.get("team") == side and str(p.get("championName", "")).casefold() == champion
+                    for p in data.get("allPlayers", [])
+                ):
+                    raise ValueError("Waiting for selected champion on selected side")
+            self.session_capture.record(data)
+        try:
+            return self.adapter.snapshot(data)
+        except (ValueError, KeyError, TypeError):
+            if self.session_capture is not None:
+                self.session_capture.decision({"status": "invalid_state"})
+            raise
 
     def infer_once(self):
-        snapshot = self.adapter.snapshot(self.fetch_live_data())
-        return self.recommend(snapshot, self.team, self.actor, self.role)
+        return self.recommend(self.observe_once(), self.team, self.actor, self.role)
 
     def run(self, *, max_polls=None):
         polls = 0
@@ -248,7 +308,11 @@ class LiveClientInference:
                 except (ValueError, KeyError, TypeError) as error:
                     result = {"status": "invalid_state", "message": str(error)}
                 print(json.dumps(result, allow_nan=False), flush=True)
+                if self.session_capture is not None:
+                    self.session_capture.heartbeat(result["status"])
                 polls += 1
+                if self.session_capture is not None and self.session_capture.ended:
+                    break
                 if max_polls is None or polls < max_polls:
                     time.sleep(max(0, self.interval_seconds - (time.monotonic() - start)))
         except KeyboardInterrupt:
@@ -264,7 +328,11 @@ class LiveClientInference:
             if self.capture is not None:
                 self.capture.close(capture_status)
         finally:
-            self.source.close()
+            try:
+                if self.session_capture is not None:
+                    self.session_capture.close(capture_status)
+            finally:
+                self.source.close()
 
 
 def main():
@@ -279,6 +347,11 @@ def main():
     parser.add_argument("--transport", choices=("auto", "local", "windows"), default="auto")
     parser.add_argument("--once", action="store_true")
     parser.add_argument(
+        "--capture-session",
+        type=Path,
+        help="Opt in to measured live samples and advice in a new directory",
+    )
+    parser.add_argument(
         "--capture-availability",
         type=Path,
         help="Opt in to aggregate availability counts in a new local directory",
@@ -292,4 +365,5 @@ def main():
         interval_seconds=args.interval,
         transport=args.transport,
         capture_availability=args.capture_availability,
+        capture_session=args.capture_session,
     ).run(max_polls=1 if args.once else None)

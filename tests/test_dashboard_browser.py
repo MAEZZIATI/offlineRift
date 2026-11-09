@@ -27,6 +27,7 @@ CHECKS = r"""
  try {
   await wait(()=>title()==='Choose your role.');
   choose('role','TOP');await wait(()=>title()==='Farm top lane');
+  check(document.getElementById('macro-direction').textContent.includes('Team direction'),'Macro proposal visible beside role advice');
   check(document.getElementById('model-kind').textContent.includes(window.testAlgorithm==='iql'?'IQL':window.testAlgorithm==='cql'?'CQL':'imitation'),'Algorithm is identified');
   check(document.getElementById('score-label').textContent==={cql:'Q-VALUE',iql:'POLICY SCORE',bc:'BEHAVIOR SCORE'}[window.testAlgorithm],'Score meaning matches the algorithm');
   check(!document.getElementById('decision-check').hidden,'Action checks visible');
@@ -60,6 +61,7 @@ CHECKS = r"""
   document.getElementById('pause').click();document.getElementById('pause').click();
   await wait(()=>document.getElementById('decision-tag').textContent==='OFFLINE');
   check(document.querySelectorAll('.alternative-row').length===0,'No stale alternatives');
+  check(document.getElementById('macro-direction').hidden,'No stale macro direction');
   window.fetch=originalFetch;
   document.getElementById('pause').click();document.getElementById('pause').click();
   await wait(()=>title()==='Farm top lane');
@@ -108,6 +110,15 @@ def test_next_action_ui_subject_role_and_stale_states(tmp_path, width, height, a
                 method=algorithm,
                 score_meaning="return estimate; not a probability",
                 scores=[5 if i == action else -i / 10 for i in range(15)],
+            )
+        if role and actor != "team":
+            result.update(
+                macro_recommendation={
+                    "status": "recommendation",
+                    "action": "Prepare the dragon area",
+                    "action_id": 8,
+                },
+                coordination={"status": "independent"},
             )
         return {
             "status": "live",

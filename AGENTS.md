@@ -2,6 +2,14 @@
 
 ## Objective and structure
 
+The final product is a coordinated six-policy macro coach: one team-direction model
+and one specialist for each of TOP, JUNGLE, MIDDLE, BOTTOM and UTILITY. All six target
+terminal team victory. An ADC pilot must never redefine or replace this product scope.
+Train and evaluate each policy separately using shared causal contracts and match splits.
+Return the team proposal and selected role's proposal together, with explicit alignment,
+conflict or missing support. Do not invent that a role model was trained conditional on
+a proposed plan when coordination is only a serving-time compatibility check.
+
 Build next-action policies for a team or a selected player/role toward terminal victory.
 Do not turn current formation labels into recommendations. A functioning offline RL run
 does not establish optimality, strategic utility or calibrated win probabilities.
@@ -17,6 +25,14 @@ does not establish optimality, strategic utility or calibrated win probabilities
 Common must import neither application nor research. Production must never import
 research. Runtime policy loading must not import training orchestration. Use composition,
 small explicit interfaces and dataclasses where useful; avoid speculative frameworks.
+
+Keep domain contracts in common, optimizer code in production/training, inference-only
+bundle loading/routing in production/inference, workflow orchestration in workflow.py,
+and optional offline comparisons/report generation in research. Six independent model
+bundles share one dataset pipeline; do not duplicate collection or training implementations.
+Make per-policy support, abstention and collapse visible, including failed macro targets.
+Do not turn "no coherent observed team action" into a positive learned strategy label.
+Archive superseded prototypes and dated reports with checksums; keep current docs concise.
 
 ## Modeling invariants
 

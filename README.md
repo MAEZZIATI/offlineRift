@@ -1,133 +1,102 @@
 # Offline Rift
 
-A local, experimental next-action companion for League of Legends. It collects real
-Match-V5 data, reconstructs executed options over measured observation intervals,
-and trains an actor/role-conditioned policy against terminal team win/loss rewards.
-It recommends **what to consider doing next**, rather than classifying the current
-team formation. Improved live win rate and optimal play have not been established.
+Offline Rift is an experimental League of Legends macro coach with **six policies**:
+one team-direction model and independent TOP, JUNGLE, MIDDLE, BOTTOM and UTILITY
+specialists. Every learned return target is derived from terminal team victory.
+The product proposes a team direction and a selected player's next activity, exposes
+agreement or conflicting directions, and abstains when support is missing.
 
-## Layout
+The ADC-only pilot is historical. It does not define the product scope. Improved
+victory rates and optimal strategy have not been established. Current work is offline;
+active-game acceptance and prospective outcome testing come later.
 
-| Folder | Responsibility |
-|---|---|
-| `production/` | Riot collection, patch catalogs, workflow, training, inference and local dashboard |
-| `common/` | Action/state contracts, causal timeline reconstruction, explicit transitions, network and persistence |
-| `research/` | New-objective dataset audits, frozen-policy diagnostics and study protocol |
-| `tests/` | Every test, with synthetic fixtures used only for deterministic verification |
+## Architecture
 
-Production never imports research. Common imports neither application. Research is an
-optional package excluded from the production wheel. There is one maintained workflow
-and serving contract; there is no formation-classifier or classifier/Q-score blend.
+| Layer | Location | Responsibility |
+|---|---|---|
+| Domain | `common/src/rift_common` | Causal observations, actions, evidence, complete transitions, scopes and compatibility |
+| Acquisition | `production/src/offline_rift/collection.py`, `catalogs.py` | Verified accounts, bounded Riot requests, raw cache and exact-patch catalogs |
+| Learning | `production/src/offline_rift/training` | One trainer, explicit critic targets, per-scope fitting and coach assembly |
+| Serving | `production/src/offline_rift/inference` | Immutable bundle verification, six-model routing and advisory persistence |
+| Delivery | `production/src/offline_rift/ui` | Local dashboard and optional session recording |
+| Orchestration | `rift` / `workflow.py` | Collect, build, train, verify and activate |
+| Research | `research/src/rift_research` | Optional offline comparisons, diagnostics, following evidence and synthesis |
+| Verification | `tests` | All synthetic fixtures and tests; no real API requests |
+
+Common imports neither production nor research. Production never imports research.
+Serving never imports training orchestration. Six independent networks use one state,
+reward and persistence contract; collection/build/train implementations are shared.
+See [architecture](docs/ARCHITECTURE.md), [modeling](docs/MODELING.md) and
+[action evidence](docs/ACTIONS.md) for contracts and limitations.
 
 ## Install
 
-Use the existing Python 3.10+ `.venv`:
+Use Python 3.10+ and the existing virtual environment:
 
 ```bash
-uv pip install --python .venv/bin/python -e '.[train,dev]' -e ./research
+uv pip install --python .venv/bin/python -e '.[train,dev,docs]' -e ./research
 ```
 
-Training and inference use Torch. The small discrete CQL implementation directly uses
-stored next states, elapsed-time discounting and action masks; it does not need d3rlpy.
-The `bc` algorithm is an imitation baseline for comparisons, not the RL default.
-The optional `iql` algorithm uses discrete implicit Q-learning with a separate categorical
-actor, twin critics and expectile value learning through the same maintained trainer.
+## Data and offline training
 
-## Collect, build and train
-
-The local `workflow.json` was migrated to version 2 using the previously verified player
-identities. Raw games, catalogs and historical artifacts were preserved. Do not initialize
-that existing configuration again.
+The existing local `workflow.json` contains verified collection identities. Do not
+reinitialize it or silently change the primary account. The Riot key can be loaded
+explicitly without printing it; only RIOT_API_KEY is imported from the file:
 
 ```bash
 .venv/bin/rift status
+.venv/bin/rift --env-file .env collect --count 100
 .venv/bin/rift build
-.venv/bin/rift train --algorithm cql --steps 10000
+.venv/bin/rift train-coach --steps 10000 --output models/my-new-coach \
+  --holdout-manifest /path/to/frozen-protocol.json
 ```
 
-Collection uses `RIOT_API_KEY` in the token header. It defaults to the configured primary
-PUUID; collecting every configured account is explicit:
+The holdout manifest contains `holdout_matches`, reserved before development selection.
+Collection defaults to the primary verified PUUID. Use `--all-players` explicitly for
+configured-account collection. Inspect support gaps before downloading more games.
+Raw matches, catalogs, models and failed/interrupted reports remain local and ignored.
+
+The coach trainer compares bounded conservative critics with a behavior-imitation
+baseline per scope. Role specialists fit only their role's rows. Macro targets require
+coherent executed macro evidence; absence of consensus is unresolved. A conservative
+Monte Carlo return-regression variant is distinct from Bellman-target CQL and is
+reported explicitly. The algorithms do not establish counterfactual policy utility.
 
 ```bash
-export RIOT_API_KEY='your-current-key'
-.venv/bin/rift collect --count 100
-.venv/bin/rift collect --all-players --count 25
-.venv/bin/rift add-player --riot-id 'Name#TAG' --region asia
+.venv/bin/rift verify --model models/my-new-coach/model
+.venv/bin/rift-research evaluate --new-matches \
+  --dataset /path/to/transitions.npz --bundle models/my-new-coach/model \
+  --output /path/to/new/evaluation
+.venv/bin/rift activate --model models/my-new-coach/model
 ```
 
-Pagination, bounded retries, Retry-After, deduplication, atomic caching and interrupted
-batch reports are retained. No Riot request is needed to build from cached games and
-cached patch catalogs. Missing catalog versions fail or download the exact patch;
-there is no nearest-patch fallback. Objective estimates currently cover patches 16.16–16.22.
+Activation verifies saved serving replay and retains the prior pointer. It publishes
+an experimental candidate, not a calibrated win predictor. Compare support, majority
+baselines, abstention, repetition and rare actions separately for every scope.
 
-Fresh projects can use `rift init --puuid VERIFIED_PUUID --region asia --name my-project`.
-Never infer a professional identity from a player name. Configuration examples are in
-`configs/workflow.example.json`; the root `workflow.json` is local and ignored.
+## Product behavior
 
-## Run the app
+The macro model suggests a team direction. A selected role specialist independently
+suggests an activity. Coordination v1 reports symbolic compatibility; it does not
+pretend the specialist was trained conditional on a hypothetical plan. Conflicts and
+missing evidence remain explicit rather than being hidden by blended scores.
+
+The observation contract is coarse. Vision, waves, camp safety, precise positions,
+casts and fine mechanics are not invented. Current formation labels are not strategy
+recommendations. Historical role metadata is retrospective; live role selection must
+be reported or explicit. Macro options are reconstructed behavior, not verified intent.
+
+Live testing is deferred. The eventual localhost UI uses:
 
 ```bash
-.venv/bin/rift ui --interval 10
+.venv/bin/rift ui --actor active --role JUNGLE --interval 5
 ```
 
-Open **http://localhost:8765**. Select **Me**, a specific live player, or **Selected team**.
-If the API does not identify your player or role, choose it explicitly; the app does not
-guess from a champion. Role-specific advice includes the action, instruction, map checks
-and a nominal next-minute horizon. Source data are coarse, so this is not a micro-mechanics
-or spell-timing coach. “Continue current activity” and insufficient-support responses are
-valid outputs; the app does not force a new macro every poll.
+Choose the actual role. Optional `--capture-session NEW_DIRECTORY` records measured
+inputs and served advice. [The session runbook](docs/RANKED_TEST.md) documents recording
+and bounded following-evidence review. No live session is required for offline checks.
 
-```bash
-# Explicit completed bundle:
-.venv/bin/rift-ui --model /path/to/next-action-policy --transport auto
-# One local poll:
-.venv/bin/rift live --once --actor active --role JUNGLE
-# Explicit opt-in: aggregate input availability only, in a new directory:
-.venv/bin/rift live --actor active --role JUNGLE \
-  --capture-availability data/research/my-availability-session
-```
-
-The game API is available during an active 5v5 game. WSL can use the Windows bridge.
-The dashboard is localhost-only, clears expired advice, supports focus/pause controls
-and does not record sessions. Restart its command after updating browser assets.
-
-## Research and limitations
-
-```bash
-.venv/bin/rift-research dataset --dataset /path/to/transitions.npz
-.venv/bin/rift-research evaluate --dataset /path/to/transitions.npz \
-  --bundle /path/to/policy --output /path/to/new/evaluation
-# Matched-split experiments across all eligible cached data (12 runs):
-.venv/bin/rift-research study --config workflow.json \
-  --output data/research/next-actions-study --steps 10000 --seeds 42 43
-```
-
-See [the modeling contract](docs/MODELING.md), [action catalog](docs/ACTIONS.md),
-[architecture](docs/ARCHITECTURE.md) and [new research protocol](research/README.md) and [initial observed study](research/docs/INITIAL_STUDY.md).
-The [matched CQL/IQL/BC study](research/docs/POLICY_COMPARISON_20261105.md) records twelve
-further runs and their concentration and missing-history limits.
-The [robustness follow-up](research/docs/ROBUSTNESS_20261105.md) audits combat evidence,
-compares joint history masking and bounded critics, and measures abstention threshold
-transfer on separate development partitions.
-Actions are reconstructed from observed behavior, not logged player commands or known
-intent. State history is causal. Live coordinates, vision, waves, camp availability and
-cast history are not invented. Both teams and all players from a match stay together in
-train/validation splits. Q values are return estimates, not win probabilities. Behavior
-agreement, macro F1 and prediction coverage diagnose data/support; they are not policy
-win-rate or counterfactual improvement estimates.
-
-The former objective's source, research documents and local configuration were archived
-under `data/archive/` and removed from maintained code. Old datasets/models remain stored
-but are intentionally rejected by the new schema. New latest references live under
-`data/projects/<name>/next-actions/`, separate from the old model pointer.
-
-Legacy experiment outputs, datasets and model directories were also moved into a
-checksummed archive. `data/archive/legacy-artifacts-latest.json` identifies its manifest,
-which records original paths and SHA-256 hashes. Raw matches, patch catalogs and active
-next-action artifacts remain in their configured locations. Historical reports retain
-their original path strings; use the archive manifest to locate moved artifacts.
-
-## Validation
+## Validation and research
 
 ```bash
 .venv/bin/ruff check .
@@ -136,15 +105,9 @@ their original path strings; use the archive manifest to locate moved artifacts.
 git diff --check
 ```
 
-Tests never call Riot or Data Dragon. Browser tests, when enabled with `RIFT_TEST_BROWSER`,
-use local synthetic UI fixtures. Full tests need the training and research packages.
-
-The [decision research follow-up](research/docs/DECISION_RESEARCH_20261105.md) tests
-minimax regret across critic seeds and controlled evidence loss. Its concentration and
-abstention tradeoffs remain experimental; it is not enabled in serving. Optional live
-availability capture stores aggregate masks and role/time buckets only, with no player
-identities, state values, recommendations or outcomes. Default use remains unrecorded.
-
-Read the four-page [mathematical synthesis](research/docs/SYNTHESIS_20261105.pdf)
-for the objective, training losses, decision-regret rule, results and next steps
-([editable source](research/docs/SYNTHESIS_20261105.md)).
+Optional Chromium checks use synthetic localhost fixtures via RIFT_TEST_BROWSER.
+Tests never call Riot or Data Dragon. Research is excluded from the production wheel.
+The [research guide](research/README.md) covers optional diagnostics and reporting.
+The new synthesis is [research/docs/SYNTHESIS.pdf](research/docs/SYNTHESIS.pdf).
+Superseded prototypes and dated documents are checksummed in the local archive;
+[history](research/docs/HISTORY.md) explains where they were preserved.

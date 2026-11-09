@@ -39,6 +39,7 @@ function clearDecision(title, message, tag = "WAITING") {
   $("decision-kicker").textContent = "WAITING FOR A SUPPORTED DECISION";
   $("decision-check").hidden = true;
   $("decision-horizon").hidden = true;
+  $("macro-direction").hidden = true;
   $("game-clock").textContent = "--:--";
   $("decision-time").textContent = "No current observation";
   emptyOptions("No current action ranking.");
@@ -83,6 +84,8 @@ function percentage(value) { return Number.isFinite(value) ? `${(value * 100).to
 function renderModel(model) {
   $("model-kind").textContent = { cql: "Offline RL · CQL", iql: "Offline RL · IQL", bc: "Behavior imitation baseline" }[model.prediction_method] || "Unknown policy";
   $("model-kind").title = model.name || "";
+  if (model.policy_count === 6) $("model-kind").textContent += " · 6 policies";
+  if (model.advisory_groups?.length === 1) $("model-kind").textContent += ` · ${ROLE_NAMES[model.advisory_groups[0]] || model.advisory_groups[0]} only`;
   const counts = model.action_counts || [];
   $("coverage").textContent = `${model.action_coverage} / ${Object.keys(latest.actions).length} actions`;
   $("agreement").textContent = percentage(model.behavior_agreement);
@@ -114,7 +117,7 @@ function render() {
   $("perspective").textContent = `${subject} · ${ROLE_NAMES[result.role] || "Select role"} · ${team === "100" ? "Blue" : "Red"}`;
   const groupMetrics = latest.model.per_group?.[result.role];
   if (groupMetrics) {
-    const predictions = groupMetrics.prediction_counts;
+    const predictions = groupMetrics.voluntary_prediction_counts || groupMetrics.prediction_counts;
     const total = predictions.reduce((sum, count) => sum + count, 0);
     const largest = Math.max(...predictions);
     if (total && (largest / total >= 0.8 || groupMetrics.prediction_coverage < 3)) {
@@ -135,7 +138,7 @@ function render() {
     $("decision-horizon").textContent = `Next ~${result.horizon_seconds}s · Reassess when the situation changes`; $("decision-horizon").hidden = false;
     $("decision-tag").textContent = result.status === "respawning" ? "RESPAWNING" : "POLICY ESTIMATE";
     $("decision-kicker").textContent = "NEXT ACTION · CHECK AGAINST YOUR MAP";
-    $("score-label").textContent = result.method === "cql" ? "Q-VALUE" : result.method === "iql" ? "POLICY SCORE" : "BEHAVIOR SCORE";
+    $("score-label").textContent = result.critic_target === "episode_return" ? "RETURN SCORE" : result.method === "cql" ? "Q-VALUE" : result.method === "iql" ? "POLICY SCORE" : "BEHAVIOR SCORE";
     $("score-note").textContent = result.score_meaning;
     for (const row of $("action-list").children) {
       const id = Number(row.dataset.action); const selected = id === result.action_id;
@@ -152,6 +155,9 @@ function render() {
     }
     if (!alternatives.length) { const item = document.createElement("li"); item.className = "empty-options"; item.textContent = "No other supported action for this observation."; $("alternatives").append(item); }
   }
+  const macro = result.macro_recommendation;
+  $("macro-direction").hidden = !macro;
+  if (macro) $("macro-direction").textContent = `Team direction: ${macro.action || macro.message || "insufficient evidence"}. ${result.coordination?.status === "conflict" ? "The proposals point in different directions; review both." : result.coordination?.status === "aligned" ? "Your role proposal supports this direction." : "Your role proposal is assessed separately."}`;
   if (Number.isFinite(result.game_time)) {
     const seconds = Math.floor(result.game_time);
     const clock = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;

@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import re
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -43,6 +44,108 @@ class Workflow:
     def state(self):
         return read_json(self.state_path) if self.state_path.exists() else {}
 
+    def verify(self, *, model=None):
+        """Read-only artifact/replay checks, not a certification of strategic utility."""
+        import torch
+        from rift_common.actions import ACTION_NAMES, GROUPS
+        from rift_common.metrics import behavior_metrics
+
+        from offline_rift.inference.coach import load_policy
+
+        stored = self.state()
+        directory = model or stored.get("model", {}).get("path")
+        if not directory:
+            raise ValueError("No next-action model; use rift train")
+        directory = Path(directory)
+        policy = load_policy(directory)
+        run = read_json(directory / "run.json")
+        if run.get("status") != "complete":
+            raise ValueError("Model run is not complete")
+        data = Path(run["dataset_path"])
+        digest = file_digest(data)
+        if digest != run["dataset_sha256"] or digest != policy.metadata.get(
+            "dataset_sha256", digest
+        ):
+            raise ValueError("Frozen dataset integrity mismatch")
+        arrays, metadata = load_dataset(data)
+        if metadata["provenance"] != policy.metadata["provenance"]:
+            raise ValueError("Frozen dataset provenance mismatch")
+        report = policy.metadata["training_report"]
+        training, validation = set(report["training_matches"]), set(report["validation_matches"])
+        if (
+            not training
+            or not validation
+            or training & validation
+            or training | validation | set(report.get("holdout_matches", []))
+            != set(arrays["match_ids"])
+        ):
+            raise ValueError("Invalid frozen match split")
+        selected = np.isin(arrays["match_ids"], list(validation))
+        observed, groups, masks = (
+            arrays[key][selected] for key in ("observations", "groups", "action_masks")
+        )
+        torch.set_num_threads(2)
+        predicted, _ = policy.predict_batch(observed, groups, masks)
+        metrics = behavior_metrics(arrays["actions"][selected], predicted, len(ACTION_NAMES))
+        if metrics != report["validation"]:
+            raise ValueError("Serving predictions do not reproduce training evaluation")
+        per_group = {}
+        for i, group in enumerate(GROUPS):
+            group_rows = groups == i
+            if not group_rows.any():
+                continue
+            choices = predicted[group_rows]
+            counts = np.bincount(choices[choices >= 0], minlength=len(ACTION_NAMES))
+            per_group[group] = {
+                "training_action_support": policy.counts[i].tolist(),
+                "behavior_agreement": float(
+                    np.mean(choices == arrays["actions"][selected][group_rows])
+                ),
+                "majority_baseline": float(
+                    np.mean(arrays["actions"][selected][group_rows] == policy.counts[i].argmax())
+                ),
+                "prediction_counts": counts.tolist(),
+                "retention_coverage": float(np.mean(choices >= 0)),
+                "largest_prediction_fraction": float(counts.max() / max(1, counts.sum())),
+            }
+        elapsed = []
+        for i in range(55):
+            row = i % len(observed)
+            start = time.perf_counter()
+            policy.predict_batch(
+                observed[row : row + 1], groups[row : row + 1], masks[row : row + 1]
+            )
+            if i >= 5:
+                elapsed.append((time.perf_counter() - start) * 1000)
+        return {
+            "status": "verified",
+            "model": str(directory.resolve()),
+            "bundle_sha256": file_digest(
+                directory / ("coach.json" if (directory / "coach.json").exists() else "bundle.json")
+            ),
+            "dataset_sha256": digest,
+            "serving_replay_verified": True,
+            "validation_matches": len(validation),
+            "validation_transitions": int(selected.sum()),
+            "metrics": metrics,
+            "per_group": per_group,
+            "single_state_latency_ms": {
+                "samples": len(elapsed),
+                "warmup": 5,
+                "cpu_threads": torch.get_num_threads(),
+                "p50": float(np.median(elapsed)),
+                "p95": float(np.quantile(elapsed, 0.95)),
+                "scope": "CPU encoded-state inference, excluding game transport and UI",
+            },
+            "stage": "experimental_next_action_policy",
+            "production_strategy_validated": False,
+            "limitations": [
+                "Artifact integrity and replay parity do not establish useful or optimal advice",
+                "Independent new-match and active-game acceptance remain necessary",
+                "No prospective victory-rate improvement has been established",
+            ],
+        }
+
     def collect(self, *, count=100, start=0, player=None, all_players=False, api=None):
         if player and all_players:
             raise ValueError("Choose one player or all players")
@@ -54,6 +157,35 @@ class Workflow:
                 raise ValueError("Select a configured PUUID or Riot ID")
         collector = Collector(self.path("raw"), self.path("artifacts"))
         return [collector.collect(p, count=count, start=start, queue=420, api=api) for p in players]
+
+    def activate(self, model):
+        """Publish a verified experimental acceptance candidate, preserving pointer history."""
+        checked = self.verify(model=model)
+        directory = Path(model).resolve()
+        metadata = read_json(directory / "metadata.json")
+        latest = self.state()
+        activated = {
+            "path": str(directory),
+            "fingerprint": checked["bundle_sha256"],
+            "algorithm": metadata["algorithm"],
+            "status": "complete",
+            "dataset_id": "next-actions-" + metadata["provenance"]["fingerprint"][:16],
+            "stage": "offline_six_policy_candidate"
+            if (directory / "coach.json").exists()
+            else "ranked_acceptance_candidate",
+        }
+        atomic_json(
+            self.path("artifacts") / "activations" / (run_id() + ".json"),
+            {
+                "previous": latest.get("model"),
+                "activated": activated,
+                "serving_replay_verified": checked["serving_replay_verified"],
+                "strategic_utility_validated": False,
+            },
+        )
+        latest["model"] = activated
+        atomic_json(self.state_path, latest)
+        return activated
 
     def raw_records(self):
         identities = {p["puuid"] for p in self.config["players"]}
@@ -72,19 +204,21 @@ class Workflow:
             seen.add(match_id)
             yield path, payload
 
-    def build(self, *, cache=None):
+    def build(self, *, cache=None, match_ids=None):
         owns = cache is None
         cache = cache or CatalogCache(self.path("catalogs"))
         try:
-            return self._build(cache)
+            return self._build(cache, match_ids=match_ids)
         finally:
             if owns:
                 cache.close()
 
-    def _build(self, cache):
+    def _build(self, cache, *, match_ids=None):
         records = []
         patches = Counter()
         for path, payload in self.raw_records():
+            if match_ids is not None and payload["match"]["metadata"]["matchId"] not in match_ids:
+                continue
             version = payload["match"]["info"]["gameVersion"]
             objectives.ObjectiveRules.validate_patch(version)
             patch = patch_of(version)
@@ -189,14 +323,14 @@ class Workflow:
         old = latest.get("model", {})
         from rift_common import network, observation_masks
 
-        from offline_rift.training import augmentation, iql, trainer
+        from offline_rift.training import augmentation, iql, targets, trainer
 
         signature = hashlib.sha256(
             json.dumps(
                 {"dataset": data["fingerprint"], "settings": settings}, sort_keys=True
             ).encode()
         )
-        for module in (network, trainer, augmentation, observation_masks):
+        for module in (network, trainer, targets, augmentation, observation_masks):
             signature.update(Path(module.__file__).read_bytes())
         if config.algorithm == "iql":
             signature.update(Path(iql.__file__).read_bytes())
@@ -249,12 +383,23 @@ class Workflow:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path("workflow.json"))
+    parser.add_argument(
+        "--env-file", type=Path, help="Load only RIOT_API_KEY from this dotenv file"
+    )
     sub = parser.add_subparsers(dest="command", required=True)
     init = sub.add_parser("init", help="Initialize a verified-player next-action project")
     init.add_argument("--puuid", required=True)
     init.add_argument("--region", required=True)
     init.add_argument("--name", default="rift")
     sub.add_parser("status", help="Show configured players and latest next-action artifacts")
+    verify = sub.add_parser(
+        "verify", help="Verify a completed model, frozen replay and local inference latency"
+    )
+    verify.add_argument("--model", type=Path)
+    activate = sub.add_parser(
+        "activate", help="Activate a verified experimental candidate and retain pointer history"
+    )
+    activate.add_argument("--model", type=Path, required=True)
     collect = sub.add_parser("collect", help="Collect real Match-V5 data, reusing cached matches")
     collect.add_argument("--count", type=int, default=100)
     collect.add_argument("--start", type=int, default=0)
@@ -264,6 +409,12 @@ def main():
     add.add_argument("--riot-id", required=True)
     add.add_argument("--region", required=True)
     sub.add_parser("build", help="Build explicit actor/role next-action transitions from cache")
+    coach = sub.add_parser(
+        "train-coach", help="Train and compare the macro coach and all five role specialists"
+    )
+    coach.add_argument("--steps", type=int, default=10000)
+    coach.add_argument("--output", type=Path, required=True)
+    coach.add_argument("--holdout-manifest", type=Path, required=True)
     for command in ("train", "run"):
         child = sub.add_parser(command, help="Build and train an experimental next-action policy")
         child.add_argument("--algorithm", choices=("cql", "bc", "iql"))
@@ -277,6 +428,11 @@ def main():
         child.add_argument("--role", choices=actions.ROLES)
         child.add_argument("--interval", type=float, default=10)
         child.add_argument("--transport", choices=("auto", "local", "windows"), default="auto")
+        child.add_argument(
+            "--capture-session",
+            type=Path,
+            help="Opt in to measured live input and advice recording",
+        )
         if command == "ui":
             child.add_argument("--port", type=int, default=8765)
         else:
@@ -288,6 +444,10 @@ def main():
             )
     args = parser.parse_args()
     try:
+        if args.env_file is not None:
+            from offline_rift.collection import load_api_key
+
+            load_api_key(args.env_file)
         if args.command == "init":
             if args.config.exists():
                 raise ValueError("Configuration already exists; no overwrite")
@@ -339,6 +499,10 @@ def main():
                     indent=2,
                 )
             )
+        elif args.command == "verify":
+            print(json.dumps(workflow.verify(model=args.model), indent=2))
+        elif args.command == "activate":
+            print(json.dumps(workflow.activate(args.model), indent=2))
         elif args.command == "collect":
             print(
                 json.dumps(
@@ -353,6 +517,15 @@ def main():
             )
         elif args.command == "add-player":
             print(json.dumps(workflow.add_player(args.riot_id, args.region)))
+        elif args.command == "train-coach":
+            from offline_rift.training.coach import train_coach
+
+            data = workflow.build()
+            reserved = read_json(args.holdout_manifest).get("holdout_matches", [])
+            result = train_coach(
+                data["path"], args.output, steps=args.steps, holdout_matches=reserved
+            )
+            print(json.dumps({"status": result["status"], "bundle": result["bundle"]}))
         elif args.command in {"build", "train", "run"}:
             data = workflow.build()
             print(
@@ -381,6 +554,7 @@ def main():
                     interval=args.interval,
                     port=args.port,
                     transport=args.transport,
+                    capture_session=args.capture_session,
                 )
             else:
                 from offline_rift.inference.live_client import LiveClientInference
@@ -393,6 +567,7 @@ def main():
                     interval_seconds=args.interval,
                     transport=args.transport,
                     capture_availability=args.capture_availability,
+                    capture_session=args.capture_session,
                 ).run(max_polls=1 if args.once else None)
     except KeyboardInterrupt:
         parser.exit(130, "Interrupted; existing data and progress reports are retained.\n")

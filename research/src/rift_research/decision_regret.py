@@ -86,7 +86,7 @@ def study_decision_regret(study, output):
         "dataset_sha256": source["dataset_sha256"],
         "source_study_sha256": file_digest(study / "study.json"),
         "source_sha256": file_digest(__file__),
-        "protocol_sha256": file_digest(Path(__file__).parents[2] / "docs/NEXT_STUDY_PROTOCOL.md"),
+        "protocol_sha256": file_digest(Path(__file__).with_name("protocol.json")),
         "views": views,
         "tolerances": [0, 0.05, 0.1, 0.25],
         "variants": [],
