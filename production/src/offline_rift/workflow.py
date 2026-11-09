@@ -163,6 +163,8 @@ class Workflow:
         checked = self.verify(model=model)
         directory = Path(model).resolve()
         metadata = read_json(directory / "metadata.json")
+        if metadata.get("development_gate_passed") is False:
+            raise ValueError("Candidate failed its development gates; activation refused")
         latest = self.state()
         activated = {
             "path": str(directory),
@@ -323,14 +325,14 @@ class Workflow:
         old = latest.get("model", {})
         from rift_common import network, observation_masks
 
-        from offline_rift.training import augmentation, iql, targets, trainer
+        from offline_rift.training import augmentation, consistency, iql, targets, trainer
 
         signature = hashlib.sha256(
             json.dumps(
                 {"dataset": data["fingerprint"], "settings": settings}, sort_keys=True
             ).encode()
         )
-        for module in (network, trainer, targets, augmentation, observation_masks):
+        for module in (network, trainer, targets, augmentation, consistency, observation_masks):
             signature.update(Path(module.__file__).read_bytes())
         if config.algorithm == "iql":
             signature.update(Path(iql.__file__).read_bytes())
@@ -523,7 +525,11 @@ def main():
             data = workflow.build()
             reserved = read_json(args.holdout_manifest).get("holdout_matches", [])
             result = train_coach(
-                data["path"], args.output, steps=args.steps, holdout_matches=reserved
+                data["path"],
+                args.output,
+                steps=args.steps,
+                holdout_matches=reserved,
+                protocol_path=args.holdout_manifest,
             )
             print(json.dumps({"status": result["status"], "bundle": result["bundle"]}))
         elif args.command in {"build", "train", "run"}:

@@ -5,6 +5,36 @@ from offline_rift.training.trainer import TrainConfig
 from rift_common.network import OptionNetwork
 
 
+def test_coordinator_counts_withheld_missing_and_independent_pairs():
+    from rift_common.actions import GROUPS, Action
+    from rift_research.evaluation import coordination_metrics
+
+    arrays = {
+        "groups": np.array([GROUPS.index("TEAM"), 0, 1, 2, 3, 4]),
+        "match_ids": np.array(["same"] * 6),
+        "teams": np.array([100] * 6),
+        "timestamps": np.array([120, 120, 120, 120, 120, 180]),
+    }
+    result = coordination_metrics(
+        arrays,
+        np.ones(6, dtype=bool),
+        np.array(
+            [
+                Action.PREPARE_DRAGON,
+                Action.PREPARE_BARON,
+                Action.CLEAR_JUNGLE,
+                Action.PREPARE_DRAGON,
+                -1,
+                Action.FARM_BOTTOM,
+            ]
+        ),
+    )
+    assert result["role_rows"] == 5
+    assert result["withheld_conflict"] == result["independent"] == result["aligned"] == 1
+    assert result["missing_macro_row"] == result["unsupported_pair"] == 1
+    assert result["simultaneous_supported_nonconflicting_pairs"] == 2
+
+
 def test_expectile_asymmetry_and_independent_actor_gradients():
     torch = pytest.importorskip("torch")
     torch.testing.assert_close(expectile_loss(torch.tensor([-2.0, 2.0]), 0.7), torch.tensor(2.0))
@@ -155,12 +185,32 @@ def test_new_match_evaluation_excludes_training_and_development(tmp_path, match_
     builder.save(expanded, catalog=catalog, provenance={"fingerprint": "expanded"})
     with pytest.raises(ValueError, match="model match split"):
         evaluate_policy(expanded, bundle, tmp_path / "wrong", samples=2)
-    result = evaluate_policy(expanded, bundle, tmp_path / "external", new_matches=True, samples=2)
+    result = evaluate_policy(
+        expanded, bundle, tmp_path / "external", new_matches=True, samples=2, stress=True
+    )
     assert result["evaluated_matches"] == ["KR_new"]
     assert result["excluded_previously_seen_matches"] == [f"KR_{i}" for i in range(4)]
     assert result["evaluation_mode"] == "new_matches"
     assert result["policy_winrate"] is None
+    assert set(result["availability_stress"]) == {"unknown_health", "cold_history"}
+    for group in result["availability_stress"]["cold_history"].values():
+        assert 0 <= group["voluntary_still_feasible_rows"] <= result["evaluated_transitions"]
+        switch = group["voluntary_changed_when_original_still_feasible"]
+        assert switch is None or 0 <= switch <= 1
     assert 0 <= result["majority_baseline"] <= 1
     assert all("training_action_support" in group for group in result["per_group"].values())
     with np.load(tmp_path / "external/predictions.npz") as archive:
         assert set(archive["match_ids"]) == {"KR_new"}
+    builder.add_match(*match_payloads("KR_other"), catalog)
+    larger = tmp_path / "larger.npz"
+    builder.save(larger, catalog=catalog, provenance={"fingerprint": "larger"})
+    restricted = evaluate_policy(
+        larger, bundle, tmp_path / "restricted", new_matches=True, samples=2, match_ids=["KR_new"]
+    )
+    assert restricted["evaluated_matches"] == ["KR_new"]
+    assert restricted["requested_match_ids"] == ["KR_new"]
+    for ids in ([], ["KR_missing"], ["KR_0"]):
+        with pytest.raises(ValueError, match="Requested evaluation IDs"):
+            evaluate_policy(
+                larger, bundle, tmp_path / "invalid", new_matches=True, samples=2, match_ids=ids
+            )

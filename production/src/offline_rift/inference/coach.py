@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 from rift_common.actions import GROUPS, ROLES, Action, feasible_actions
 from rift_common.artifacts import file_digest, read_json
-from rift_common.coaching import POLICY_SCOPES, alignment
+from rift_common.coaching import POLICY_SCOPES, alignment, withhold_conflicting_role
 
 from offline_rift.inference.policy import NextActionPolicy
 
@@ -65,7 +65,7 @@ class MacroCoach:
         if self.metadata["dataset_sha256"] != reference["dataset_sha256"]:
             raise ValueError("Coach aggregate dataset differs")
         self.encoder = self.policies["TEAM"].encoder
-        self.name, self.algorithm = directory.name, "cql"
+        self.name, self.algorithm = directory.name, self.metadata["algorithm"]
         self.advisory_groups = POLICY_SCOPES
         self.counts = np.zeros((len(GROUPS), len(Action)), dtype=np.int64)
         for scope, policy in self.policies.items():
@@ -114,15 +114,17 @@ class MacroCoach:
                 "game_time": current.time,
             }
         result = self.policies[role].recommend(current, team, actor, role=role, previous=previous)
-        return {
-            **result,
-            "policy_scope": role,
-            "macro_recommendation": macro,
-            "coordination": {
-                "status": alignment(macro, result),
-                "meaning": "Symbolic direction compatibility; not learned plan conditioning or proof of tactical safety",
-            },
-        }
+        return withhold_conflicting_role(
+            {
+                **result,
+                "policy_scope": role,
+                "macro_recommendation": macro,
+                "coordination": {
+                    "status": alignment(macro, result),
+                    "meaning": "Symbolic direction compatibility; not learned plan conditioning or proof of tactical safety",
+                },
+            }
+        )
 
 
 def load_policy(directory):

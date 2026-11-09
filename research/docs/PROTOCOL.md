@@ -4,16 +4,17 @@ The product contains six separate networks: TEAM, TOP, JUNGLE, MIDDLE, BOTTOM an
 UTILITY. Freeze corpus membership, match-level partitions and scope-specific
 training settings before fitting. Do not select on reserved-match diagnostics.
 
-The current comparison uses split seed 42, optimizer seed 42 and 10,000 updates per
-candidate. Per scope compare two conservative critics and one imitation baseline.
-Macro critics use complete observed episode-return targets because identified macro
-intervals rarely coincide with terminal frames. Role critics compare Bellman targets
-with observed return regression. All rewards remain terminal team victory/loss.
+The current robustness comparison freezes split seed 42, optimizer seed 42 and 6,000
+updates per candidate. Per scope compare ordinary imitation and conservative observed-
+return regression with availability-consistent versions (four per scope). All rewards
+remain terminal team victory/loss. The previous 18-run study remains historical.
 
-BC measures imitation and is not automatically promoted as an RL policy. Select
-noncollapsed CQL candidates first, then identified development macro F1, with lower
-voluntary concentration as a tie breaker. Report failures and thin support explicitly.
-Selection on behavior diagnostics is exploratory and does not establish strategic value.
+All algorithms may be selected. See docs/MATHEMATICAL_DESIGN.md for the exact development
+score, gates and losses. The frozen machine-readable study protocol is retained in
+data/research/coherent-robust-protocol-20261109.json. A bounded latest-ten collection across
+57 configured verified accounts found 21 new IDs, reserved before fitting. Previously
+viewed test matches are development evidence. No fresh-test retuning is allowed.
+Selection on behavior diagnostics remains exploratory and does not establish strategic value.
 
 Report source hashes, evidence exclusions, action/role support, majority baseline,
 abstention, action concentration and isolated saved-model serving parity for all scopes.

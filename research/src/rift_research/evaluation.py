@@ -3,10 +3,62 @@
 from pathlib import Path
 
 import numpy as np
-from rift_common.actions import ACTION_NAMES, GROUPS
+from rift_common.actions import ACTION_NAMES, GROUPS, ROLES, Action
 from rift_common.artifacts import atomic_json, file_digest
+from rift_common.coaching import DESTINATIONS
 from rift_common.dataset import load_dataset
 from rift_common.metrics import behavior_metrics
+
+
+def coordination_metrics(arrays, selected, predictions):
+    """Pair only measured same-match/team/time rows; never interpolate missing macro rows."""
+    groups = arrays["groups"][selected]
+    keys = list(
+        zip(
+            arrays["match_ids"][selected], arrays["teams"][selected], arrays["timestamps"][selected]
+        )
+    )
+    macros = {
+        key: int(action)
+        for key, group, action in zip(keys, groups, predictions)
+        if group == GROUPS.index("TEAM")
+    }
+    counts = {
+        name: 0
+        for name in (
+            "role_rows",
+            "missing_macro_row",
+            "unsupported_pair",
+            "forced_respawn",
+            "aligned",
+            "independent",
+            "withheld_conflict",
+        )
+    }
+    for key, group, action in zip(keys, groups, predictions):
+        if GROUPS[group] not in ROLES:
+            continue
+        counts["role_rows"] += 1
+        if key not in macros:
+            counts["missing_macro_row"] += 1
+            continue
+        macro = macros[key]
+        if action < 0 or macro < 0:
+            label = "unsupported_pair"
+        elif action == Action.WAIT_RESPAWN or macro == Action.WAIT_RESPAWN:
+            label = "forced_respawn"
+        elif action == macro:
+            label = "aligned"
+        elif action in DESTINATIONS and macro in DESTINATIONS:
+            label = "withheld_conflict"
+        else:
+            label = "independent"
+        counts[label] += 1
+    return {
+        **counts,
+        "simultaneous_supported_nonconflicting_pairs": counts["aligned"] + counts["independent"],
+        "meaning": "Raw routing proposals with instantaneous symbolic abstention rule; no persistence simulation or strategic compatibility proof",
+    }
 
 
 def describe_dataset(path):
@@ -34,7 +86,9 @@ def describe_dataset(path):
     }
 
 
-def evaluate_policy(dataset, bundle, output, *, samples=500, new_matches=False, stress=False):
+def evaluate_policy(
+    dataset, bundle, output, *, samples=500, new_matches=False, stress=False, match_ids=None
+):
     from offline_rift.inference.coach import load_policy
 
     output = Path(output)
@@ -47,8 +101,20 @@ def evaluate_policy(dataset, bundle, output, *, samples=500, new_matches=False, 
     if not training or not validation or training & validation:
         raise ValueError("Invalid or incompatible model match split")
     corpus = set(arrays["match_ids"])
+    requested = None if match_ids is None else set(match_ids)
+    if requested is not None and (
+        not new_matches
+        or not requested
+        or not requested <= corpus
+        or requested & (training | validation)
+    ):
+        raise ValueError(
+            "Requested evaluation IDs must be nonempty, present and absent from training/development; use new_matches"
+        )
     if new_matches:
         evaluated_matches = corpus - (training | validation)
+        if requested is not None:
+            evaluated_matches &= requested
         if not evaluated_matches:
             raise ValueError("No new matches outside the frozen training/development corpus")
     else:
@@ -103,6 +169,7 @@ def evaluate_policy(dataset, bundle, output, *, samples=500, new_matches=False, 
         "evaluation_mode": "new_matches" if new_matches else "frozen_validation",
         "validation_matches": sorted(validation),
         "evaluated_matches": sorted(evaluated_matches),
+        "requested_match_ids": sorted(requested) if requested is not None else None,
         "excluded_previously_seen_matches": sorted(corpus & (training | validation))
         if new_matches
         else [],
@@ -171,7 +238,11 @@ def evaluate_policy(dataset, bundle, output, *, samples=500, new_matches=False, 
         ).tolist()
         if np.isfinite(scores).any()
         else [],
-        "score_meaning": "Q estimate" if policy.algorithm == "cql" else "policy logit",
+        "score_meaning": "per-policy scores; child methods may use different units"
+        if hasattr(policy, "policies")
+        else "Q estimate"
+        if policy.algorithm == "cql"
+        else "policy logit",
         "behavior_macro_f1_match_bootstrap_95": np.quantile(estimates, [0.025, 0.975]).tolist(),
         "bootstrap_samples": samples,
         "policy_winrate": None,
@@ -205,36 +276,49 @@ def evaluate_policy(dataset, bundle, output, *, samples=500, new_matches=False, 
                 arrays["groups"][mask],
                 omitted_masks,
             )
-            result["availability_stress"][scenario] = {
-                group: {
-                    "changed_fraction": float(
-                        np.mean(
-                            changed[arrays["groups"][mask] == i]
-                            != predicted[arrays["groups"][mask] == i]
-                        )
-                    ),
-                    "retention": float(np.mean(changed[arrays["groups"][mask] == i] >= 0)),
+            voluntary = still_feasible & (predicted != Action.WAIT_RESPAWN)
+            group_results = {}
+            for i, group in enumerate(GROUPS):
+                rows = arrays["groups"][mask] == i
+                if not rows.any():
+                    continue
+                eligible = rows & still_feasible
+                choices = rows & voluntary
+                group_results[group] = {
+                    "changed_fraction": float(np.mean(changed[rows] != predicted[rows])),
+                    "retention": float(np.mean(changed[rows] >= 0)),
                     "original_choice_made_infeasible_fraction": float(
-                        np.mean(((predicted >= 0) & ~still_feasible)[arrays["groups"][mask] == i])
+                        np.mean(((predicted >= 0) & ~still_feasible)[rows])
                     ),
                     "changed_when_original_still_feasible": float(
-                        np.mean(
-                            changed[(arrays["groups"][mask] == i) & still_feasible]
-                            != predicted[(arrays["groups"][mask] == i) & still_feasible]
-                        )
+                        np.mean(changed[eligible] != predicted[eligible])
                     )
-                    if np.any((arrays["groups"][mask] == i) & still_feasible)
+                    if eligible.any()
+                    else None,
+                    "voluntary_still_feasible_rows": int(choices.sum()),
+                    "voluntary_changed_when_original_still_feasible": float(
+                        np.mean(changed[choices] != predicted[choices])
+                    )
+                    if choices.any()
                     else None,
                 }
-                for i, group in enumerate(GROUPS)
-                if np.any(arrays["groups"][mask] == i)
-            }
+            result["availability_stress"][scenario] = group_results
+    if hasattr(policy, "policies"):
+        result["coordination"] = coordination_metrics(arrays, mask, predicted)
+        result["score_quantiles"] = []
+        for scope, child in policy.policies.items():
+            if scope in result["per_group"]:
+                result["per_group"][scope]["algorithm"] = child.algorithm
     output.mkdir(parents=True, exist_ok=False)
     np.savez_compressed(
         output / "predictions.npz",
         truth=truth,
         predicted=predicted,
         match_ids=arrays["match_ids"][mask],
+        groups=arrays["groups"][mask],
+        teams=arrays["teams"][mask],
+        timestamps=arrays["timestamps"][mask],
+        actors=arrays["actors"][mask],
         scores=scores,
     )
     atomic_json(output / "report.json", result)

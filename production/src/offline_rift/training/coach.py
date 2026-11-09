@@ -7,11 +7,12 @@ from shutil import copy2, copytree
 
 import numpy as np
 import rift_common
-from rift_common.actions import GROUPS, Action
+from rift_common.actions import GROUPS, Action, feasible_actions
 from rift_common.artifacts import atomic_json, file_digest, read_json
 from rift_common.coaching import POLICY_SCOPES
 from rift_common.dataset import load_dataset
 from rift_common.metrics import behavior_metrics
+from rift_common.observation_masks import COLD_START_FIELDS
 
 from offline_rift.inference.coach import MacroCoach
 from offline_rift.inference.policy import NextActionPolicy
@@ -31,7 +32,25 @@ def scope_diagnostics(policy, arrays, scope):
     identified = arrays["action_identified"][selected]
     counts = np.bincount(predictions[predictions >= 0], minlength=len(Action))
     counts[Action.WAIT_RESPAWN] = 0
-    return {
+    cold = arrays["observations"][selected].copy()
+    cold[:, [policy.encoder.names.index(n) for n in COLD_START_FIELDS]] = 0
+    cold_masks = feasible_actions(cold, policy.encoder.names)
+    cold_predictions, _ = policy.predict_batch(cold, arrays["groups"][selected], cold_masks)
+    eligible_truth = identified & cold_masks[np.arange(len(truth)), truth]
+    eligible_choice = (predictions >= 0) & cold_masks[
+        np.arange(len(predictions)), np.maximum(predictions, 0)
+    ]
+    changes = (
+        float(np.mean(predictions[eligible_choice] != cold_predictions[eligible_choice]))
+        if eligible_choice.any()
+        else None
+    )
+    cold_identified = (
+        behavior_metrics(truth[eligible_truth], cold_predictions[eligible_truth], len(Action))
+        if eligible_truth.any()
+        else None
+    )
+    result = {
         "descriptive": behavior_metrics(truth, predictions, len(Action)),
         "identified": behavior_metrics(truth[identified], predictions[identified], len(Action))
         if identified.any()
@@ -40,10 +59,38 @@ def scope_diagnostics(policy, arrays, scope):
         "voluntary_concentration": float(counts.max() / max(1, counts.sum())),
         "identified_validation_rows": int(identified.sum()),
         "majority_baseline": float(np.mean(truth == policy.counts[GROUPS.index(scope)].argmax())),
+        "cold_identified": cold_identified,
+        "cold_identified_rows": int(eligible_truth.sum()),
+        "cold_retention": float(np.mean(cold_predictions >= 0)),
+        "still_feasible_choice_changes": changes,
     }
+    clean_f1 = (result["identified"] or {}).get("macro_f1", 0)
+    cold_f1 = (cold_identified or {}).get("macro_f1", 0)
+    result["selection_score"] = (clean_f1 + cold_f1) / 2 - 0.1 * (
+        changes if changes is not None else 1
+    )
+    result["development_gate_passed"] = (
+        result["identified_validation_rows"] > 0
+        and result["cold_identified_rows"] > 0
+        and result["voluntary_concentration"] <= 0.9
+        and min(result["retention"], result["cold_retention"]) >= 0.5
+    )
+    return result
 
 
-def train_coach(dataset, output, *, steps=10000, holdout_matches=(), seed=42):
+def select_candidate(candidates):
+    """Frozen exploratory diagnostics; no algorithm receives selection priority."""
+    return max(
+        candidates,
+        key=lambda item: (
+            item["development_gate_passed"],
+            item["selection_score"],
+            -item["voluntary_concentration"],
+        ),
+    )
+
+
+def train_coach(dataset, output, *, steps=10000, holdout_matches=(), seed=42, protocol_path=None):
     """Retain all comparisons; choose on development only, never publish a latest pointer."""
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
@@ -57,10 +104,14 @@ def train_coach(dataset, output, *, steps=10000, holdout_matches=(), seed=42):
         "candidates": {},
         "selected": {},
         "policy_winrate": None,
-        "selection": "Noncollapsed CQL candidates first, then highest within-scope identified development F1; BC is diagnostic only",
+        "selection": "All algorithms eligible; development gate, then mean clean/cold identified F1 minus 0.1 times still-feasible choice disagreement",
+        "study_design": "coherent-robust-v1",
         "coverage": {},
         "source_sha256": {},
     }
+    if protocol_path is not None:
+        copy2(protocol_path, output / "protocol.json")
+        report["protocol_sha256"] = file_digest(output / "protocol.json")
     for root in (Path(__file__).parents[1], Path(rift_common.__file__).parent):
         for source in root.rglob("*.py"):
             name = str(source.relative_to(root.parent))
@@ -89,12 +140,20 @@ def train_coach(dataset, output, *, steps=10000, holdout_matches=(), seed=42):
             }
             settings = replace(base, training_groups=(scope,), advisory_groups=(scope,))
             candidates = {
-                "cql-td" if scope != "TEAM" else "cql-return-001": {
-                    "alpha": 0.01,
-                    "critic_target": "td" if scope != "TEAM" else "episode_return",
-                },
                 "cql-return-003": {"alpha": 0.03, "critic_target": "episode_return"},
                 "bc": {"algorithm": "bc", "bounded_values": False},
+                "cql-consistent": {
+                    "alpha": 0.03,
+                    "critic_target": "episode_return",
+                    "joint_history_dropout": 0.5,
+                    "history_consistency_weight": 0.25,
+                },
+                "bc-consistent": {
+                    "algorithm": "bc",
+                    "bounded_values": False,
+                    "joint_history_dropout": 0.5,
+                    "history_consistency_weight": 0.25,
+                },
             }
             report["candidates"][scope] = []
             for name, overrides in candidates.items():
@@ -112,21 +171,17 @@ def train_coach(dataset, output, *, steps=10000, holdout_matches=(), seed=42):
                     }
                 )
                 atomic_json(output / "study.json", report)
-            choices = [
-                r for r in report["candidates"][scope] if r["settings"]["algorithm"] == "cql"
-            ]
-            selected = max(
-                choices,
-                key=lambda r: (
-                    not r["descriptive"]["collapsed"],
-                    (r["identified"] or {}).get("macro_f1", -1),
-                    -r["voluntary_concentration"],
-                ),
-            )
+            selected = select_candidate(report["candidates"][scope])
             report["selected"][scope] = selected
             atomic_json(output / "study.json", report)
         directory = assemble_coach(dataset, report["selected"], output / "model", arrays=arrays)
-        report.update(status="complete", bundle=str(directory.resolve()))
+        report.update(
+            status="complete",
+            bundle=str(directory.resolve()),
+            development_gate_passed=all(
+                r["development_gate_passed"] for r in report["selected"].values()
+            ),
+        )
         return report
     except BaseException as error:
         report.update(
@@ -202,6 +257,12 @@ def assemble_coach(dataset, selections, directory, *, arrays=None):
         training_report=training,
         selection=selections,
         architecture="six independent scoped networks; symbolic coordination only",
+        development_gate_passed=all(
+            item.get("development_gate_passed", True) for item in selections.values()
+        ),
+        algorithm="mixed"
+        if len({item["settings"]["algorithm"] for item in selections.values()}) > 1
+        else first["algorithm"],
     )
     atomic_json(directory / "metadata.json", aggregate)
     atomic_json(

@@ -82,7 +82,7 @@ function updateActors(data) {
 
 function percentage(value) { return Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : "Not recorded"; }
 function renderModel(model) {
-  $("model-kind").textContent = { cql: "Offline RL · CQL", iql: "Offline RL · IQL", bc: "Behavior imitation baseline" }[model.prediction_method] || "Unknown policy";
+  $("model-kind").textContent = { cql: "Offline RL · CQL", iql: "Offline RL · IQL", bc: "Behavior imitation baseline", mixed: "Scoped imitation / return models" }[model.prediction_method] || "Unknown policy";
   $("model-kind").title = model.name || "";
   if (model.policy_count === 6) $("model-kind").textContent += " · 6 policies";
   if (model.advisory_groups?.length === 1) $("model-kind").textContent += ` · ${ROLE_NAMES[model.advisory_groups[0]] || model.advisory_groups[0]} only`;
@@ -127,7 +127,7 @@ function render() {
   }
   const ready = ["recommendation", "respawning"].includes(result.status);
   if (!ready) {
-    const titles = { needs_role: "Choose your role.", needs_player: "Choose a player.", opening: "Follow your opening plan.", insufficient_support: "No supported action yet.", invalid_context: "Check your player selection." };
+    const titles = { needs_role: "Choose your role.", needs_player: "Choose a player.", opening: "Follow your opening plan.", insufficient_support: "No supported action yet.", coordination_conflict: "Role direction withheld.", invalid_context: "Check your player selection." };
     clearDecision(titles[result.status] || "No current recommendation.", result.message || "Waiting for enough context.", "CONTEXT NEEDED");
   } else {
     if (!Array.isArray(result.scores) || !Object.hasOwn(latest.actions, result.action_id)) throw Error("Invalid action response");
@@ -157,7 +157,7 @@ function render() {
   }
   const macro = result.macro_recommendation;
   $("macro-direction").hidden = !macro;
-  if (macro) $("macro-direction").textContent = `Team direction: ${macro.action || macro.message || "insufficient evidence"}. ${result.coordination?.status === "conflict" ? "The proposals point in different directions; review both." : result.coordination?.status === "aligned" ? "Your role proposal supports this direction." : "Your role proposal is assessed separately."}`;
+  if (macro) $("macro-direction").textContent = `Team direction: ${macro.action || macro.message || "insufficient evidence"}. ${result.coordination?.status === "withheld_conflict" ? "Conflicting role direction withheld; no replacement inferred." : result.coordination?.status === "conflict" ? "The proposals point in different directions; review both." : result.coordination?.status === "aligned" ? "Your role proposal supports this direction." : "Your role proposal is assessed separately."}`;
   if (Number.isFinite(result.game_time)) {
     const seconds = Math.floor(result.game_time);
     const clock = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;

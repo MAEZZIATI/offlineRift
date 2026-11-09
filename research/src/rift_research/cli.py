@@ -22,6 +22,11 @@ def main():
     evaluate.add_argument("--output", type=Path, required=True)
     evaluate.add_argument("--bootstrap-samples", type=int, default=500)
     evaluate.add_argument(
+        "--match-manifest",
+        type=Path,
+        help="Restrict --new-matches to a frozen manifest's holdout_matches",
+    )
+    evaluate.add_argument(
         "--stress",
         action="store_true",
         help="Also diagnose controlled missing-health/history inputs",
@@ -100,12 +105,22 @@ def main():
     )
     synthesis.add_argument("--study", type=Path, required=True)
     synthesis.add_argument("--evaluation", type=Path, required=True)
+    synthesis.add_argument("--baseline-evaluation", type=Path)
     synthesis.add_argument("--output", type=Path, default=Path("research/docs/SYNTHESIS.pdf"))
     args = parser.parse_args()
     if args.command == "synthesize":
         from rift_research.reporting import synthesize
 
-        print(json.dumps(synthesize(args.study, args.evaluation, args.output)))
+        print(
+            json.dumps(
+                synthesize(
+                    args.study,
+                    args.evaluation,
+                    args.output,
+                    baseline_evaluation=args.baseline_evaluation,
+                )
+            )
+        )
         return
     if args.command == "adherence":
         from rift_research.adherence import review_adherence
@@ -188,6 +203,9 @@ def main():
             samples=args.bootstrap_samples,
             new_matches=args.new_matches,
             stress=args.stress,
+            match_ids=json.loads(args.match_manifest.read_text())["holdout_matches"]
+            if args.match_manifest
+            else None,
         )
     )
     print(json.dumps(report, indent=2))

@@ -10,10 +10,13 @@ The terminal team outcome remains the objective; behavior metrics are not win ra
 - `rift-research evaluate`: reproduce frozen development predictions.
 - `rift-research evaluate --new-matches`: evaluate only IDs absent from the model's
   training and development partitions. Freeze these matches before selecting models.
+  Add `--match-manifest FROZEN_PROTOCOL.json` to restrict evaluation to its
+  `holdout_matches`, so historical models are compared on exactly the same new IDs.
 - `rift-research study` and `sensitivity`: optional matched optimizer and omission studies.
 - `audit-combat`, `calibrate-coverage`, `decision-regret`: optional evidence/decision diagnostics.
 - `audit-session` and `adherence`: explicitly opted-in sessions and measured following evidence.
 - `synthesize`: generate the current Markdown/PDF from a completed coach and evaluation.
+  Optional `--baseline-evaluation DIRECTORY` requires matching data and evaluation IDs.
 
 Train the six policies with `rift train-coach`, not a separate research trainer.
 Each candidate records its configuration, data digest, scope, match split, optimizer

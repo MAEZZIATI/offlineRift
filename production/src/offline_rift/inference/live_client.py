@@ -259,11 +259,13 @@ class LiveClientInference:
         )
         if isinstance(result, dict):
             if "macro_recommendation" in result:
-                from rift_common.coaching import alignment
+                from rift_common.coaching import alignment, withhold_conflicting_role
 
                 result["macro_recommendation"] = self.advice.select(result["macro_recommendation"])
                 result["coordination"]["status"] = alignment(result["macro_recommendation"], result)
             result = self.advice.select(result)
+            if "macro_recommendation" in result:
+                result = withhold_conflicting_role(result)
         if self.session_capture is not None:
             observed = self.policy.encoder.encode(
                 snapshot, team, actor, role=role, previous=self.adapter.previous

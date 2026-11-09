@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 import torch
 from offline_rift.training.augmentation import ObservationAugmenter
+from offline_rift.training.consistency import history_consistency
 from offline_rift.training.trainer import TrainConfig
 from rift_common.actions import Action, feasible_actions
 from rift_common.network import OptionNetwork
@@ -53,8 +54,44 @@ def test_bounded_critic_keeps_actor_logits_unbounded_and_gradients_finite():
         {"joint_history_dropout": -0.1},
         {"joint_history_dropout": 1.1},
         {"bounded_values": True, "algorithm": "iql"},
+        {"history_consistency_weight": -1},
+        {"history_consistency_weight": float("nan")},
+        {"history_consistency_weight": 1, "algorithm": "iql"},
     ],
 )
 def test_invalid_robustness_settings(settings):
     with pytest.raises(ValueError, match="configuration"):
         TrainConfig(**settings)
+
+
+def test_consistency_has_finite_gradients_and_skips_invalidated_targets(match_payloads, catalog):
+    encoder = StateEncoder(catalog)
+    state = encoder.encode(read_match(*match_payloads())[3], 100, "1")
+    state[encoder.names.index("dragon_enabled")] = 1
+    state[encoder.names.index("dragon_eta")] = 0
+    states = torch.tensor(np.stack([state, state]))
+    masks = torch.tensor(feasible_actions(states.numpy(), encoder.names))
+    network = OptionNetwork(len(encoder.names), bounded_values=True)
+    support = torch.ones(7, len(Action), dtype=torch.bool)
+    args = (network, states, masks)
+    invalid = history_consistency(
+        *args,
+        torch.tensor([Action.PREPARE_DRAGON] * 2),
+        torch.tensor([0, 0]),
+        support,
+        encoder.names,
+        critic=True,
+    )
+    assert invalid == 0
+    loss = history_consistency(
+        *args,
+        torch.tensor([Action.CONTINUE] * 2),
+        torch.tensor([0, 0]),
+        support,
+        encoder.names,
+        critic=True,
+    )
+    assert torch.isfinite(loss) and loss > 0
+    loss.backward()
+    assert any(p.grad is not None and p.grad.abs().sum() > 0 for p in network.parameters())
+    assert all(p.grad is None or torch.isfinite(p.grad).all() for p in network.parameters())

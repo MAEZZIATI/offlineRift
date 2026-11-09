@@ -28,6 +28,9 @@ Serving never imports training orchestration. Six independent networks use one s
 reward and persistence contract; collection/build/train implementations are shared.
 See [architecture](docs/ARCHITECTURE.md), [modeling](docs/MODELING.md) and
 [action evidence](docs/ACTIONS.md) for contracts and limitations.
+The [active task](task.md) defines the product work. The
+[mathematical design](docs/MATHEMATICAL_DESIGN.md) gives the objective, losses,
+missing-history regularizer, coherence constraint and their assumptions.
 
 ## Install
 
@@ -56,8 +59,10 @@ Collection defaults to the primary verified PUUID. Use `--all-players` explicitl
 configured-account collection. Inspect support gaps before downloading more games.
 Raw matches, catalogs, models and failed/interrupted reports remain local and ignored.
 
-The coach trainer compares bounded conservative critics with a behavior-imitation
-baseline per scope. Role specialists fit only their role's rows. Macro targets require
+The coach trainer compares ordinary imitation and bounded conservative return regression
+with availability-consistent versions per scope. Every algorithm is eligible; selection
+uses clean/cold development evidence with explicit retention and concentration gates.
+Role specialists fit only their role's rows. Macro targets require
 coherent executed macro evidence; absence of consensus is unresolved. A conservative
 Monte Carlo return-regression variant is distinct from Bellman-target CQL and is
 reported explicitly. The algorithms do not establish counterfactual policy utility.
@@ -66,6 +71,7 @@ reported explicitly. The algorithms do not establish counterfactual policy utili
 .venv/bin/rift verify --model models/my-new-coach/model
 .venv/bin/rift-research evaluate --new-matches \
   --dataset /path/to/transitions.npz --bundle models/my-new-coach/model \
+  --match-manifest /path/to/frozen-protocol.json \
   --output /path/to/new/evaluation
 .venv/bin/rift activate --model models/my-new-coach/model
 ```
@@ -77,9 +83,10 @@ baselines, abstention, repetition and rare actions separately for every scope.
 ## Product behavior
 
 The macro model suggests a team direction. A selected role specialist independently
-suggests an activity. Coordination v1 reports symbolic compatibility; it does not
-pretend the specialist was trained conditional on a hypothetical plan. Conflicts and
-missing evidence remain explicit rather than being hidden by blended scores.
+suggests an activity. Different explicit destinations cause the role proposal to be
+withheld, while the macro direction remains visible. No replacement action is invented.
+Other nonmatching proposals remain independent, not proven strategically aligned.
+The specialist was not trained conditional on a hypothetical plan; scores are not blended.
 
 The observation contract is coarse. Vision, waves, camp safety, precise positions,
 casts and fine mechanics are not invented. Current formation labels are not strategy

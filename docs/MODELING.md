@@ -59,17 +59,18 @@ is followed by unresolved activity. It does not create intermediate commands, jo
 episodes or treat the observed trajectory return as a causal alternative-action value.
 Call it conservative observed-return regression, not a replication of standard CQL.
 
-The macro comparison uses observed-return variants because its identified intervals
-rarely coincide with terminal frames. Role comparisons include Bellman and observed-
-return variants. Behavior cloning is an imitation baseline; it is not selected as an
-RL winner automatically. Discrete IQL remains an optional diagnostic implementation.
+The current comparison uses observed-return regression and imitation, each with and
+without stronger joint omission and availability-aware consistency. Every algorithm is
+eligible. The earlier Bellman comparison remains historical; discrete IQL remains optional.
+See MATHEMATICAL_DESIGN.md for equations and frozen exploratory development gates.
 
 ## Composition and evaluation
 
 The six child policies are fitted independently with one trainer, common encoder and
 fixed match partitions. The serving router verifies compatible schema, data digest and
-scope, then returns the macro proposal plus role proposal. Symbolic alignment/conflict
-reporting does not claim learned conditioning on a hypothetical team plan.
+scope, then returns the macro proposal plus role proposal. A conflicting role destination
+is withheld without inferring an alternative; recheck after persistence. This constraint
+does not claim learned conditioning on a hypothetical team plan or strategic correctness.
 
 Use development data for per-scope candidate selection. Evaluate the fixed selection
 once on reserved unseen match IDs. Report identified and all-row descriptive agreement,

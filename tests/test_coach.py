@@ -2,10 +2,10 @@ import numpy as np
 import pytest
 from offline_rift.inference.advice import AdviceController
 from offline_rift.inference.coach import MacroCoach
-from offline_rift.training.coach import train_coach
-from rift_common.artifacts import read_json
+from offline_rift.training.coach import select_candidate, train_coach
+from rift_common.artifacts import atomic_json, file_digest, read_json
 from rift_common.behavior import team_activity
-from rift_common.coaching import POLICY_SCOPES, alignment
+from rift_common.coaching import POLICY_SCOPES, alignment, withhold_conflicting_role
 from rift_common.dataset import DatasetBuilder, episode_returns, load_dataset
 from rift_common.timeline import read_match
 
@@ -18,6 +18,23 @@ def macro_match(factory, name):
             "y": 11000,
         }
     return match, timeline
+
+
+def test_selection_allows_imitation_and_rejects_collapsed_high_scoring_candidate():
+    ordinary = {
+        "name": "cql",
+        "development_gate_passed": True,
+        "selection_score": 0.1,
+        "voluntary_concentration": 0.3,
+    }
+    imitation = {**ordinary, "name": "bc", "selection_score": 0.2}
+    collapsed = {
+        **ordinary,
+        "name": "collapsed",
+        "development_gate_passed": False,
+        "selection_score": 0.9,
+    }
+    assert select_candidate([ordinary, imitation, collapsed]) is imitation
 
 
 def test_macro_requires_coherent_executed_evidence_not_formation_fallback(match_payloads):
@@ -61,6 +78,24 @@ def test_retained_role_advice_uses_fresh_macro_direction_and_rechecks_alignment(
     assert result["coordination"]["status"] == "independent"
 
 
+def test_conflicting_role_is_withheld_without_inventing_an_alternative():
+    original = {
+        "status": "recommendation",
+        "action_id": 8,
+        "action": "Dragon",
+        "scores": [0.1] * 15,
+        "macro_recommendation": {"status": "recommendation", "action_id": 9},
+    }
+    guarded = withhold_conflicting_role(original)
+    assert guarded["status"] == "coordination_conflict"
+    assert "action_id" not in guarded and "scores" not in guarded
+    assert guarded["macro_recommendation"]["action_id"] == 9
+    assert guarded["coordination"]["withheld_action_id"] == 8
+    assert original["action_id"] == 8
+    independent = {**original, "action_id": 3}
+    assert withhold_conflicting_role(independent) == independent
+
+
 def test_six_real_models_are_scope_trained_reload_route_and_detect_corruption(
     tmp_path, match_payloads, catalog
 ):
@@ -69,8 +104,17 @@ def test_six_real_models_are_scope_trained_reload_route_and_detect_corruption(
         builder.add_match(*macro_match(match_payloads, f"KR_{i}"), catalog)
     path = tmp_path / "data.npz"
     builder.save(path, catalog=catalog, provenance={"fingerprint": "fixture"})
-    result = train_coach(path, tmp_path / "coach", steps=1, holdout_matches=("KR_3",))
+    protocol = tmp_path / "protocol.json"
+    atomic_json(protocol, {"holdout_matches": ["KR_3"], "steps": 1})
+    result = train_coach(
+        path, tmp_path / "coach", steps=1, holdout_matches=("KR_3",), protocol_path=protocol
+    )
     assert result["status"] == "complete" and set(result["selected"]) == set(POLICY_SCOPES)
+    assert (
+        result["protocol_sha256"]
+        == file_digest(tmp_path / "coach/protocol.json")
+        == file_digest(protocol)
+    )
     coach = MacroCoach(result["bundle"])
     arrays, _ = load_dataset(path)
     predictions, _ = coach.predict_batch(

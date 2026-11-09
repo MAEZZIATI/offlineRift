@@ -31,6 +31,11 @@ bundle loading/routing in production/inference, workflow orchestration in workfl
 and optional offline comparisons/report generation in research. Six independent model
 bundles share one dataset pipeline; do not duplicate collection or training implementations.
 Make per-policy support, abstention and collapse visible, including failed macro targets.
+Keep mathematical assumptions and losses in docs/MATHEMATICAL_DESIGN.md. All algorithms,
+including imitation, may compete on frozen development criteria; never exclude a better
+baseline solely to promote RL. Report robustness/coverage tradeoffs and failed gates.
+Withhold conflicting role destinations after persistence rather than inventing a compatible
+alternative. Independent proposals are not proof of strategic coherence.
 Do not turn "no coherent observed team action" into a positive learned strategy label.
 Archive superseded prototypes and dated reports with checksums; keep current docs concise.
 

@@ -18,6 +18,7 @@ from torch.nn import functional as F
 
 from offline_rift.training import augmentation
 from offline_rift.training.augmentation import ObservationAugmenter
+from offline_rift.training.consistency import history_consistency
 from offline_rift.training.targets import critic_targets
 
 
@@ -48,6 +49,7 @@ class TrainConfig:
     advisory_groups: tuple[str, ...] = GROUPS
     training_groups: tuple[str, ...] = GROUPS
     critic_target: str = "td"
+    history_consistency_weight: float = 0.0
 
     def __post_init__(self):
         for name in ("steps", "batch_size", "seed", "minimum_support", "cpu_threads"):
@@ -67,6 +69,7 @@ class TrainConfig:
             "target_tau",
             "joint_history_dropout",
             "minimum_score_gap",
+            "history_consistency_weight",
         ):
             if not math.isfinite(getattr(self, name)):
                 raise ValueError("Invalid training configuration: finite settings required")
@@ -75,6 +78,8 @@ class TrainConfig:
             or self.target_mode not in {"identified", "representative"}
             or self.critic_target not in {"td", "episode_return"}
             or self.minimum_score_gap < 0
+            or self.history_consistency_weight < 0
+            or (self.history_consistency_weight > 0 and self.algorithm == "iql")
             or not self.advisory_groups
             or any(group not in GROUPS for group in self.advisory_groups)
             or not self.training_groups
@@ -182,6 +187,7 @@ class PolicyTrainer:
                 "augmentation": file_digest(augmentation.__file__),
                 "observation_masks": file_digest(observation_masks.__file__),
                 "targets": file_digest(Path(__file__).with_name("targets.py")),
+                "consistency": file_digest(Path(__file__).with_name("consistency.py")),
             },
         }
         if config.algorithm == "iql":
@@ -233,6 +239,18 @@ class PolicyTrainer:
             for step in range(1, config.steps + 1):
                 chosen = rng.choice(rows, size=config.batch_size)
                 batch = {key: value[chosen].to(config.device) for key, value in tensors.items()}
+                consistency_loss = torch.zeros((), device=config.device)
+                if config.history_consistency_weight:
+                    consistency_loss = history_consistency(
+                        network,
+                        batch["observations"],
+                        batch["action_masks"],
+                        batch["actions"],
+                        batch["groups"],
+                        support,
+                        metadata["feature_names"],
+                        critic=config.algorithm == "cql",
+                    )
                 batch["observations"], batch["action_masks"] = augmenter(
                     batch["observations"], batch["action_masks"], actions=batch["actions"]
                 )
@@ -261,6 +279,7 @@ class PolicyTrainer:
                 else:
                     td_loss = conservative = torch.zeros((), device=config.device)
                     loss = bc_loss
+                loss = loss + config.history_consistency_weight * consistency_loss
                 if not torch.isfinite(loss):
                     raise RuntimeError("Non-finite optimizer loss")
                 optimizer.zero_grad()
@@ -276,6 +295,7 @@ class PolicyTrainer:
                         "td_loss": float(td_loss.detach()),
                         "cql_penalty": float(conservative.detach()),
                         "behavior_loss": float(bc_loss.detach()),
+                        "history_consistency_loss": float(consistency_loss.detach()),
                     }
                     atomic_json(output / "progress.json", last)
             network.eval()

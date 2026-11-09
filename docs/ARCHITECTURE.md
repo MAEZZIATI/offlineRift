@@ -42,6 +42,7 @@ flowchart LR
 - `coaching.py`: six policy scopes and conservative symbolic compatibility.
 - `production/src/offline_rift/training/trainer.py`: maintained optimizer path.
 - `training/targets.py`: Bellman versus observed episode-return targets.
+- `training/consistency.py`: supported, shared-feasibility history-omission regularization.
 - `training/coach.py`: per-scope comparisons and immutable six-policy assembly.
 - `inference/policy.py`: one independently loadable network.
 - `inference/coach.py`: six-network composition and schema/integrity checks.
@@ -71,8 +72,9 @@ under the local archive; the current product is never narrowed by an old ADC pil
 
 TEAM is evaluated on the same causal observation as the selected specialist. Matching
 symbolic directions are aligned; distinct explicit destinations are conflicts; other
-activities are independent. Missing advice is unresolved. Coordination does not blend
-scores or override a role choice with an unsupported plan. Specialist policies are not
+activities are independent. Missing advice is unresolved. A conflicting role destination
+is withheld, without inventing a replacement; recheck after delivery persistence.
+Coordination does not blend scores or override a role choice with an unsupported plan. Specialist policies are not
 claimed to be trained conditionally on a counterfactual team proposal.
 
 ## Scalability and current limits

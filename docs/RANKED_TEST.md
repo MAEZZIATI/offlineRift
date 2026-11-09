@@ -26,7 +26,9 @@ CLASSIC mode alone does not verify ranked queue membership.
 The same process serves and records recommendations, issuance/expiry times, measured
 stats/items/events and feature availability. Player names are omitted in saved samples.
 Persistence requires continued support; death, abstention or lost support withdraws
-advice. Scores are not win probabilities. Objective and route checks still require
+advice. Conflicting explicit role/team destinations withdraw the role direction while
+the team proposal remains visible; no compatible alternative is inferred. Independent
+proposals are not proof of strategic alignment. Scores are not win probabilities. Objective and route checks still require
 your assessment; unobserved vision, waves and safe paths are not reconstructed.
 
 ## After the game
