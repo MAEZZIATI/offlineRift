@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "name": "rift",
+  "primary_puuid": "VERIFIED_PUUID",
+  "product": {"kind": "six-policy-macro-coach", "policy_scopes": ["TEAM", "TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"], "live_acceptance": "deferred"},
+  "players": [{"puuid": "VERIFIED_PUUID", "region": "asia", "riot_id": ""}],
+  "paths": {
+    "raw": "data/raw",
+    "catalogs": "data/catalogs",
+    "artifacts": "data/projects/rift/next-actions",
+    "models": "models/next-actions/rift"
+  },
+  "training": {"algorithm": "cql", "steps": 10000, "batch_size": 256, "seed": 42, "alpha": 0.01, "gamma": 0.99, "minimum_support": 20, "bounded_values": true, "target_mode": "identified"}
+}

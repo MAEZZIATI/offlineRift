@@ -1,178 +1,132 @@
-from __future__ import annotations
-
-import json
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock
 
+import numpy as np
 import pytest
-
-from offline_rift.pipeline.action_labeler import load_dataset
-from offline_rift.pipeline.data_pipeline import TimelineProcessor
-from offline_rift.pipeline.features import FeatureConfig
-from offline_rift.workflow import CatalogCache, ResearchWorkflow, atomic_json
+from offline_rift.workflow import Workflow
+from rift_common.artifacts import atomic_json
 
 
 def prepare(tmp_path, match_payloads):
-    raw = tmp_path / "data" / "raw"
+    config = {
+        "version": 2,
+        "name": "test",
+        "primary_puuid": "player-1",
+        "players": [{"puuid": "player-1", "region": "asia", "riot_id": "Example#TEST"}],
+        "paths": {
+            "raw": "raw",
+            "catalogs": "catalogs",
+            "artifacts": "artifacts",
+            "models": "models",
+        },
+        "training": {"steps": 2, "minimum_support": 1},
+    }
+    atomic_json(tmp_path / "workflow.json", config)
     for i in range(3):
         match, timeline = match_payloads(f"KR_{i}")
-        match["info"].update(queueId=420, gameVersion="16.19.123.456")
-        for p in match["info"]["participants"]:
-            p["puuid"] = "common-player" if p["participantId"] == 1 else f"{i}-{p['participantId']}"
-            p.update(riotIdGameName="Test Player", riotIdTagline="KR1")
-        atomic_json(raw / f"KR_{i}.json", {"match": match, "timeline": timeline})
-    workflow = ResearchWorkflow.initialize(tmp_path / "workflow.json", name="research")
-    atomic_json(
-        workflow.path("catalogs") / "items-16.19.json",
-        {"version": "16.19.1", "data": {"1001": {"gold": {"total": 3000}}}},
-    )
-    return workflow
+        atomic_json(tmp_path / "raw" / f"KR_{i}.json", {"match": match, "timeline": timeline})
+    return Workflow(tmp_path / "workflow.json")
 
 
-def test_adopt_existing_data_and_rebuild_only_on_changes(tmp_path, match_payloads):
+def test_immutable_build_cache_reuse_and_changed_input(tmp_path, match_payloads, catalog):
     workflow = prepare(tmp_path, match_payloads)
-    assert workflow.config["player"]["region"] == "asia"
-    assert workflow.config["player"]["puuid"] == "common-player"
-    assert workflow.status()["cached_matches"] == 3
-    with CatalogMock(workflow) as cache:
-        first = workflow.build(cache=cache)
-        second = workflow.build(cache=cache)
-        assert first == second
-        assert first["matches"] == 3
-        assert first["catalog_versions"] == {"16.19": "16.19.1"}
-        assert not cache.session.get.called
-        workflow.config["features"]["item_spike_gold"] = 4000
-        changed = workflow.build(cache=cache)
-    assert changed["fingerprint"] != first["fingerprint"]
-    assert first["path"] != changed["path"]
-    arrays, metadata = load_dataset(first["path"])
-    assert len(set(arrays["match_ids"])) == 3
-    assert metadata["provenance"]["catalog_versions"] == {"16.19": "16.19.1"}
-
-
-class CatalogMock(CatalogCache):
-    def __init__(self, workflow):
-        super().__init__(workflow.path("catalogs"), session=Mock())
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_):
-        self.close()
-
-
-def test_catalog_auto_download_selects_matching_patch_and_caches(tmp_path):
-    session = Mock()
-    versions = Mock()
-    versions.json.return_value = ["16.21.1", "16.19.2", "16.19.1"]
-    items = Mock()
-    items.json.return_value = {"version": "16.19.2", "data": {"1001": {"gold": {"total": 300}}}}
-    session.get.side_effect = [versions, items]
-    cache = CatalogCache(tmp_path, session=session)
-    assert cache.get("16.19")[1] == "16.19.2"
-    assert cache.get("16.19")[0].value(1001) == 300
-    assert session.get.call_count == 2
-    fresh = CatalogCache(tmp_path, session=Mock())
-    assert fresh.get("16.19")[1] == "16.19.2"
-    fresh.session.get.assert_not_called()
-
-
-def test_collection_paginates_and_resumes_cached_downloads(tmp_path, match_payloads):
-    workflow = prepare(tmp_path, match_payloads)
-    api = Mock()
-    # First attempt caches one new match, then fails. Next attempt reuses that file.
+    cache = SimpleNamespace(get=lambda patch: (catalog, "16.22.1", "catalog-hash"))
+    first = workflow.build(cache=cache)
+    assert first["matches"] == 3 and first["episodes"] == 36
+    assert workflow.build(cache=cache)["path"] == first["path"]
+    old = Path(first["path"]).read_bytes()
     match, timeline = match_payloads("KR_new")
-    api.fetch_match_ids.return_value = ["KR_0", "KR_new", "KR_fail"]
-    api.fetch_match.side_effect = [match, RuntimeError("connection interrupted")]
-    api.fetch_timeline.return_value = timeline
-    with pytest.raises(RuntimeError, match="interrupted"):
-        workflow.collect(api=api)
-    assert (workflow.path("raw") / "KR_new.json").is_file()
-    failed = [
-        json.loads(p.read_text()) for p in (workflow.path("artifacts") / "batches").glob("*.json")
-    ]
-    assert failed[0]["status"] == "failed"
-    api.reset_mock(side_effect=True)
-    api.fetch_match_ids.side_effect = [["KR_0", "KR_new"], []]
-    # Request 101 so pagination has two pages; page 1 must be full to reach page 2.
-    ids = ["KR_0", "KR_new"] + [f"KR_extra_{i}" for i in range(98)]
-    api.fetch_match_ids.side_effect = [ids, []]
-    api.fetch_match.side_effect = lambda mid: match_payloads(mid)[0]
-    api.fetch_timeline.side_effect = lambda mid: match_payloads(mid)[1]
-    manifest = workflow.collect(count=101, start=20, api=api)
-    assert manifest["status"] == "complete"
-    assert manifest["reused"] == ["KR_0", "KR_new"]
-    assert len(manifest["downloaded"]) == 98
-    assert [c.kwargs["start"] for c in api.fetch_match_ids.call_args_list] == [20, 120]
-    assert [c.kwargs["count"] for c in api.fetch_match_ids.call_args_list] == [100, 1]
+    atomic_json(tmp_path / "raw/KR_new.json", {"match": match, "timeline": timeline})
+    second = workflow.build(cache=cache)
+    assert second["fingerprint"] != first["fingerprint"]
+    assert Path(first["path"]).read_bytes() == old
+    assert workflow.state()["dataset"]["path"] == second["path"]
 
 
-def test_real_monster_event_names(match_payloads):
-    match, timeline = match_payloads()
-    timeline["info"]["frames"][1]["events"] += [
-        {
-            "type": "ELITE_MONSTER_KILL",
-            "timestamp": 40000,
-            "monsterType": "BARON_NASHOR",
-            "killerId": 1,
-        },
-        {
-            "type": "ELITE_MONSTER_KILL",
-            "timestamp": 45000,
-            "monsterType": "RIFTHERALD",
-            "killerId": 1,
-        },
-    ]
-    snapshots = TimelineProcessor(FeatureConfig()).parse(match, timeline)
-    state = next(s for s in snapshots if s.time == 50)
-    assert state.objectives["baron"]["eta"] == 350
-    assert state.objectives["baron_buff"]["team"] == 100
-    assert not state.objectives["herald"]["enabled"]
-
-
-def test_training_is_versioned_and_unchanged_runs_are_reused(tmp_path, match_payloads):
-    pytest.importorskip("d3rlpy")
+def test_failed_training_does_not_publish_latest_model(
+    tmp_path, match_payloads, catalog, monkeypatch
+):
     workflow = prepare(tmp_path, match_payloads)
-    workflow.config["training"].update(n_steps=3, n_steps_per_epoch=2, batch_size=4)
-    dataset = workflow.build()
-    first = workflow.train(dataset)
-    assert first["status"] == "complete"
-    assert workflow.train(dataset) == first
-    assert first["report"]["optimizer_steps"] == 3  # No rounding down incomplete epochs.
-    second = workflow.train(dataset, force=True)
-    assert second["path"] != first["path"]
+    data = workflow.build(cache=SimpleNamespace(get=lambda patch: (catalog, "16.22.1", "hash")))
+    state = workflow.state()
+    state["model"] = {"path": "prior-completed-model", "fingerprint": "prior"}
+    atomic_json(workflow.state_path, state)
+    monkeypatch.setattr(
+        "offline_rift.training.trainer.PolicyTrainer.train",
+        Mock(side_effect=RuntimeError("optimizer failed")),
+    )
+    with pytest.raises(RuntimeError, match="optimizer failed"):
+        workflow.train(data, force=True)
+    assert workflow.state()["model"] == state["model"]
 
 
-def test_add_verified_player_collect_and_deduplicate_combined_corpus(tmp_path, match_payloads):
+def test_legacy_workflow_is_rejected_without_modification(tmp_path):
+    path = tmp_path / "workflow.json"
+    atomic_json(path, {"version": 1})
+    before = path.read_bytes()
+    with pytest.raises(ValueError, match="version-2"):
+        Workflow(path)
+    assert path.read_bytes() == before
+
+
+def test_reload_parity_failure_preserves_active_model_and_failed_report(
+    tmp_path, match_payloads, catalog, monkeypatch
+):
+    from rift_common.artifacts import read_json
+
     workflow = prepare(tmp_path, match_payloads)
-    primary = workflow.config["player"].copy()
-    api = Mock()
-    api.resolve_account.return_value = {
-        "puuid": "chovy-puuid",
-        "gameName": "허거덩",
-        "tagLine": "0303",
-    }
-    player = workflow.add_player("허거덩#0303", "kr", api=api)
-    assert player["region"] == "asia"
-    assert workflow.config["player"] == primary
-    assert ResearchWorkflow(workflow.config_path).players() == [primary, player]
-    with pytest.raises(ValueError, match="already configured"):
-        workflow.add_player("허거덩#0303", "kr", api=api)
-    with pytest.raises(ValueError, match="configured"):
-        workflow.collect(player="unverified-name", api=api)
+    data = workflow.build(cache=SimpleNamespace(get=lambda patch: (catalog, "16.22.1", "hash")))
+    previous = workflow.state()
+    previous["model"] = {"path": "prior-model", "fingerprint": "prior"}
+    atomic_json(workflow.state_path, previous)
+    monkeypatch.setattr(
+        "offline_rift.inference.policy.NextActionPolicy.predict_batch",
+        lambda self, observed, groups, masks: (np.full(len(observed), -1), None),
+    )
+    with pytest.raises(RuntimeError, match="serving prediction parity"):
+        workflow.train(data, force=True)
+    assert workflow.state()["model"] == previous["model"]
+    runs = list(workflow.path("models").glob("*/run.json"))
+    assert len(runs) == 1 and read_json(runs[0])["status"] == "failed"
 
-    match, timeline = match_payloads("KR_chovy")
-    match["info"].update(queueId=420, gameVersion="16.19.123.456")
-    match["info"]["participants"][0]["puuid"] = "chovy-puuid"
-    api.fetch_match_ids.return_value = ["KR_0", "KR_chovy", "KR_chovy"]
-    api.fetch_match.return_value = match
-    api.fetch_timeline.return_value = timeline
-    batch = workflow.collect(count=100, player="허거덩#0303", api=api)
-    assert batch["downloaded"] == ["KR_chovy"]
-    assert batch["reused"] == ["KR_0"]
-    assert batch["player"] == player
-    api.fetch_match_ids.assert_called_once_with("chovy-puuid", start=0, count=100, queue=420)
-    report = workflow.build()
-    assert report["matches"] == 4
-    assert report["source_players"] == [primary, player]
-    arrays, _ = load_dataset(report["path"])
-    assert len(set(arrays["match_ids"])) == 4
+
+def test_reused_model_is_reloaded_and_rejects_corruption(tmp_path, match_payloads, catalog):
+    workflow = prepare(tmp_path, match_payloads)
+    data = workflow.build(cache=SimpleNamespace(get=lambda patch: (catalog, "16.22.1", "hash")))
+    model = workflow.train(data)
+    assert workflow.train(data) == model
+    before = workflow.state_path.read_bytes()
+    verified = workflow.verify()
+    assert verified["status"] == "verified" and verified["serving_replay_verified"]
+    assert verified["validation_matches"] == 1
+    assert not verified["production_strategy_validated"]
+    assert verified["single_state_latency_ms"]["samples"] == 50
+    assert workflow.state_path.read_bytes() == before
+    with (Path(model["path"]) / "policy.pt").open("ab") as stream:
+        stream.write(b"corrupted")
+    previous = workflow.state_path.read_bytes()
+    with pytest.raises(ValueError, match="integrity"):
+        workflow.train(data)
+    with pytest.raises(ValueError, match="integrity"):
+        workflow.verify()
+    assert workflow.state_path.read_bytes() == previous
+
+
+def test_activation_retains_previous_reference_and_verifies_first(
+    tmp_path, match_payloads, catalog
+):
+    from rift_common.artifacts import read_json
+
+    workflow = prepare(tmp_path, match_payloads)
+    data = workflow.build(cache=SimpleNamespace(get=lambda patch: (catalog, "16.22.1", "hash")))
+    model = workflow.train(data)
+    activated = workflow.activate(model["path"])
+    assert activated["stage"] == "ranked_acceptance_candidate"
+    history = list((workflow.path("artifacts") / "activations").glob("*.json"))
+    assert len(history) == 1 and read_json(history[0])["previous"] == model
+    (Path(model["path"]) / "policy.pt").write_bytes(b"broken")
+    before = workflow.state_path.read_bytes()
+    with pytest.raises(ValueError, match="integrity"):
+        workflow.activate(model["path"])
+    assert workflow.state_path.read_bytes() == before

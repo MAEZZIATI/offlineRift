@@ -1,149 +1,120 @@
 # Offline Rift
 
-A Python backend for collecting League Match-V5 timelines, labeling twelve team macro
-actions, training discrete offline CQL, and polling the local Live Client API.
+Offline Rift is an experimental League of Legends macro coach with **six policies**:
+one team-direction model and independent TOP, JUNGLE, MIDDLE, BOTTOM and UTILITY
+specialists. Every learned return target is derived from terminal team victory.
+The product proposes a team direction and a selected player's next activity, exposes
+agreement or conflicting directions, and abstains when support is missing.
 
-The main workflow uses **your real cached matches**. There is no synthetic-data step.
+The ADC-only pilot is historical. It does not define the product scope. Improved
+victory rates and optimal strategy have not been established. Current work is offline;
+active-game acceptance and prospective outcome testing come later.
 
-## Your existing Faker dataset
+## Architecture
 
-`data/raw/` contains 100 ranked solo/duo games from the account `Hide on bush#KR1`,
-spanning patches 16.18, 16.19, and 16.20. The initializer infers the player shared
-across the files and the Korean routing region automatically.
+| Layer | Location | Responsibility |
+|---|---|---|
+| Domain | `common/src/rift_common` | Causal observations, actions, evidence, complete transitions, scopes and compatibility |
+| Acquisition | `production/src/offline_rift/collection.py`, `catalogs.py` | Verified accounts, bounded Riot requests, raw cache and exact-patch catalogs |
+| Learning | `production/src/offline_rift/training` | One trainer, explicit critic targets, per-scope fitting and coach assembly |
+| Serving | `production/src/offline_rift/inference` | Immutable bundle verification, six-model routing and advisory persistence |
+| Delivery | `production/src/offline_rift/ui` | Local dashboard and optional session recording |
+| Orchestration | `rift` / `workflow.py` | Collect, build, train, verify and activate |
+| Research | `research/src/rift_research` | Optional offline comparisons, diagnostics, following evidence and synthesis |
+| Verification | `tests` | All synthetic fixtures and tests; no real API requests |
 
-```bash
-cd /home/amine/offlineRift
-source .venv/bin/activate
-rift status
+Common imports neither production nor research. Production never imports research.
+Serving never imports training orchestration. Six independent networks use one state,
+reward and persistence contract; collection/build/train implementations are shared.
+See [architecture](docs/ARCHITECTURE.md), [modeling](docs/MODELING.md) and
+[action evidence](docs/ACTIONS.md) for contracts and limitations.
+The [active task](task.md) defines the product work. The
+[mathematical design](docs/MATHEMATICAL_DESIGN.md) gives the objective, losses,
+missing-history regularizer, coherence constraint and their assumptions.
 
-# One-time setup, only when workflow.json does not exist:
-rift init --name faker
+## Install
 
-# Process cached matches and train only when inputs/settings have changed:
-rift run
-
-# Show data coverage and current artifact paths:
-rift status
-```
-
-`workflow.json` is already initialized in this workspace. Your normal command is now
-**`rift run`**. No Riot key is needed to process cached games. Data Dragon
-downloads require internet only when patch catalogs are missing.
-
-Use these commands in your WSL terminal from the repository root. If `rift` is not
-found, run `.venv/bin/python -m offline_rift status` without activation, or refresh
-the installation with `uv pip install --python .venv/bin/python -e '.[train,dev]'`.
-The older `python workflow.py ...` command is also supported.
-
-## Add games later
-
-```bash
-export RIOT_API_KEY='your-current-key'
-rift run --refresh
-```
-
-This checks the latest 100 games, reuses cached matches, downloads new ones, builds
-from **all** cached games for the configured player/queue, and trains when needed.
-Increase `collection.count` in `workflow.json` to scan more history. For older games:
+Use Python 3.10+ and the existing virtual environment:
 
 ```bash
-rift collect --start 100 --count 200
-rift run
+uv pip install --python .venv/bin/python -e '.[train,dev,docs]' -e ./research
 ```
 
-Requests paginate automatically. Batches get unique IDs and progress manifests.
-Interrupted collection resumes by reusing completed downloads. Datasets get content-based
-IDs; model runs get timestamp IDs. Earlier artifacts are retained and unchanged runs
-reuse their outputs.
+## Data and offline training
 
-## Change settings
-
-Edit `workflow.json`, then run `rift run` again.
-
-- Training changes reuse the dataset and create a new model run.
-- Data, preprocessing, feature, or catalog changes rebuild the dataset automatically.
-- `run --retrain` forces another fit on unchanged data.
-- `run --refresh-catalogs` checks for updated Data Dragon builds within each match's patch.
-
-Patch-matched item downloads and output naming are automatic. The old `data/item.json`
-and `data/macro.npz` are preserved but are not used by the new workflow. Objective timing
-rules remain explicit configuration; catalog downloads do not validate them.
-
-## Use the latest policy
+The existing local `workflow.json` contains verified collection identities. Do not
+reinitialize it or silently change the primary account. The Riot key can be loaded
+explicitly without printing it; only RIOT_API_KEY is imported from the file:
 
 ```bash
-rift ui
+.venv/bin/rift status
+.venv/bin/rift --env-file .env collect --count 100
+.venv/bin/rift build
+.venv/bin/rift train-coach --steps 10000 --output models/my-new-coach \
+  --holdout-manifest /path/to/frozen-protocol.json
 ```
 
-Open **http://localhost:8765** in your browser. Choose blue or red side to see the
-latest model suggestion, twelve macro ranking scores, game clock, and model limitations.
-The dashboard waits for an active 5v5 Summoner's Rift match; no model path or Riot
-API key is needed. Stop the command with Ctrl-C.
+The holdout manifest contains `holdout_matches`, reserved before development selection.
+Collection defaults to the primary verified PUUID. Use `--all-players` explicitly for
+configured-account collection. Inspect support gaps before downloading more games.
+Raw matches, catalogs, models and failed/interrupted reports remain local and ignored.
 
-The UI is plain HTML/CSS/JavaScript in `src/offline_rift/ui/static/`, served by a
-small Python standard-library server. It loads one CPU model, shares one cached
-game fetch across tabs, refreshes every 30 seconds, and pauses hidden tabs. No Node,
-frontend build, cloud service, or new runtime dependency is required.
-
-On WSL, `auto` transport uses Windows `curl.exe` when available to read the Windows
-game's loopback API. On native Windows/Linux it uses local HTTP. See the
-[live UI guide](docs/LIVE_UI.md) for setup, transport overrides, and limitations.
-The terminal interface remains available: `rift live --team 100 --once`.
-
-## Documentation
-
-- **[Workflow guide](docs/WORKFLOW.md):** commands, editable configuration, patch updates,
-  artifact layout, interruption recovery, reports, and limitations.
-- **[Backend reference](docs/BACKEND.md):** modules, Python interfaces, features, MDP arrays.
-- **[Current real-data results](docs/RESULTS_V2.md):** the 200-match model and controlled prediction comparisons.
-- **[First real-data results](docs/RESULTS.md):** the historical 100-match baseline and its limitations.
-- **[Project structure](docs/STRUCTURE.md):** package layout, compatibility entry points,
-  and locations for configuration and generated artifacts.
-
-| File | Responsibility |
-|---|---|
-| `src/offline_rift/workflow.py` | Collection/cache orchestration, patch catalogs, versioned datasets and runs |
-| `src/offline_rift/pipeline/data_pipeline.py` | Riot requests and causal 10-second snapshots |
-| `src/offline_rift/pipeline/features.py` | Shared feature schema, item valuation, objective estimates |
-| `src/offline_rift/pipeline/action_labeler.py` | Twelve weak macro labels, rewards, NPZ validation |
-| `src/offline_rift/training/rl_agent.py` | Discrete CQL trainer and policy loader |
-| `src/offline_rift/training/train_macro_model.py` | Direct CLI for training an explicit NPZ dataset |
-| `src/offline_rift/inference/live_client.py` | Local polling, features, and recommendations |
-| `src/offline_rift/inference/transport.py` | Bounded local/Windows game API access |
-| `src/offline_rift/ui/` | Browser assets, shared snapshot cache, and local HTTP serving |
-| `scripts/` | Small compatibility launchers for the package commands |
-
-## Install and test
-
-Python 3.10+:
+The coach trainer compares ordinary imitation and bounded conservative return regression
+with availability-consistent versions per scope. Every algorithm is eligible; selection
+uses clean/cold development evidence with explicit retention and concentration gates.
+Role specialists fit only their role's rows. Macro targets require
+coherent executed macro evidence; absence of consensus is unresolved. A conservative
+Monte Carlo return-regression variant is distinct from Bellman-target CQL and is
+reported explicitly. The algorithms do not establish counterfactual policy utility.
 
 ```bash
-uv venv --python 3.11 .venv
-source .venv/bin/activate
-uv pip install -e '.[train,dev]'
-pytest -q
-ruff check .
+.venv/bin/rift verify --model models/my-new-coach/model
+.venv/bin/rift-research evaluate --new-matches \
+  --dataset /path/to/transitions.npz --bundle models/my-new-coach/model \
+  --match-manifest /path/to/frozen-protocol.json \
+  --output /path/to/new/evaluation
+.venv/bin/rift activate --model models/my-new-coach/model
 ```
 
-Use `rift` for the workflow. Compatibility launchers are in `scripts/`, for example
-`python scripts/workflow.py status`. Import backend APIs from `offline_rift`.
+Activation verifies saved serving replay and retains the prior pointer. It publishes
+an experimental candidate, not a calibrated win predictor. Compare support, majority
+baselines, abstention, repetition and rare actions separately for every scope.
 
-## Interpretation
+## Product behavior
 
-These are weak team-positioning labels, not records of Faker's intended decisions.
-Both teams contribute separate episodes, kept together in train/validation splits.
-A single player's history is a small, biased research corpus. Validation agreement
-with heuristic labels does not establish win-rate improvement or optimal play.
+The macro model suggests a team direction. A selected role specialist independently
+suggests an activity. Different explicit destinations cause the role proposal to be
+withheld, while the macro direction remains visible. No replacement action is invented.
+Other nonmatching proposals remain independent, not proven strategically aligned.
+The specialist was not trained conditional on a hypothetical plan; scores are not blended.
 
-Minute-level frames are forward-filled onto the 10-second grid. The default live
-profile masks features unavailable from the Live Client API in training and serving.
-Objective timers are configurable estimates. Q-values are discounted-return estimates,
-not calibrated win probabilities.
-- **[Execution guide](docs/EXECUTION.md):** recollect, train, and run against an active game,
-  including Windows/WSL setup.
+The observation contract is coarse. Vision, waves, camp safety, precise positions,
+casts and fine mechanics are not invented. Current formation labels are not strategy
+recommendations. Historical role metadata is retrospective; live role selection must
+be reported or explicit. Macro options are reconstructed behavior, not verified intent.
 
-The current `rift-v2` / `macro-v2` implementation requires rebuilding and retraining
-old bundles with `rift run`. Historical artifacts remain on disk. See
-[model improvement directions and research](docs/MODEL_IMPROVEMENTS.md) for the action
-contract, deep set encoder, experiment protocol, limitations, and proposed innovations.
-To add the requested second account, follow [the multi-player workflow](docs/WORKFLOW.md#add-chovys-requested-account).
+Live testing is deferred. The eventual localhost UI uses:
+
+```bash
+.venv/bin/rift ui --actor active --role JUNGLE --interval 5
+```
+
+Choose the actual role. Optional `--capture-session NEW_DIRECTORY` records measured
+inputs and served advice. [The session runbook](docs/RANKED_TEST.md) documents recording
+and bounded following-evidence review. No live session is required for offline checks.
+
+## Validation and research
+
+```bash
+.venv/bin/ruff check .
+.venv/bin/ruff format --check .
+.venv/bin/python -m pytest -q
+git diff --check
+```
+
+Optional Chromium checks use synthetic localhost fixtures via RIFT_TEST_BROWSER.
+Tests never call Riot or Data Dragon. Research is excluded from the production wheel.
+The [research guide](research/README.md) covers optional diagnostics and reporting.
+The new synthesis is [research/docs/SYNTHESIS.pdf](research/docs/SYNTHESIS.pdf).
+Superseded prototypes and dated documents are checksummed in the local archive;
+[history](research/docs/HISTORY.md) explains where they were preserved.

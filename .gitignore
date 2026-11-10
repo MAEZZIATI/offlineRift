@@ -5,8 +5,8 @@ __pycache__/
 *.egg-info/
 .env
 workflow.json
-data/
-models/
-d3rlpy_logs/
+/data/
+/models/
+/d3rlpy_logs/
 build/
 dist/

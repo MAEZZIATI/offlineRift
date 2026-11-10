@@ -4,18 +4,19 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "offline-rift"
-version = "0.1.0"
-description = "Offline macro decision research prototype for Summoner's Rift"
+version = "0.2.0"
+description = "Actor-conditioned offline next-action policies for Summoner's Rift"
 requires-python = ">=3.10"
-dependencies = ["numpy>=1.26,<3", "requests>=2.31,<3", "pandas>=2.0,<3"]
+dependencies = ["numpy>=1.26,<3", "requests>=2.31,<3"]
 
 [project.optional-dependencies]
-train = ["d3rlpy==2.8.1", "torch>=2.5,<3"]
+inference = ["torch>=2.5,<3"]
+train = ["torch>=2.5,<3"]
 dev = ["pytest>=8,<9", "ruff>=0.9"]
+docs = ["matplotlib>=3.9,<4", "reportlab>=4,<6", "pymupdf>=1.26,<3"]
 
 [project.scripts]
-rift-collect = "offline_rift.pipeline.data_pipeline:main"
-rift-train = "offline_rift.training.train_macro_model:main"
+rift-train = "offline_rift.training.trainer:main"
 rift-live = "offline_rift.inference.live_client:main"
 rift = "offline_rift.workflow:main"
 rift-ui = "offline_rift.ui.server:main"
@@ -25,14 +26,16 @@ py-modules = ["workflow"]
 
 [tool.setuptools.package-dir]
 "" = "."
-offline_rift = "src/offline_rift"
+offline_rift = "production/src/offline_rift"
+rift_common = "common/src/rift_common"
 
 [tool.setuptools.packages.find]
-where = ["src"]
-include = ["offline_rift*"]
+where = ["production/src", "common/src"]
+include = ["offline_rift*", "rift_common*"]
 
 [tool.setuptools.package-data]
 "offline_rift.ui" = ["static/*.html", "static/*.css", "static/*.js"]
+"rift_common" = ["objective_rules.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
