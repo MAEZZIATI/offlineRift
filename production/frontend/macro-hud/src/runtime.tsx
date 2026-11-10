@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Settings, X } from "lucide-react";
+import { Settings } from "lucide-react";
 import { MacroHUD } from "./MacroHUD";
 import { createHudStore } from "./store";
 import { PLAYER_ROLES } from "./types";
 import "./runtime.css";
 
-interface Frame {
+export interface Frame {
   schema: "macro-hud-frame-v1";
   session_id: string;
   context_version: number;
@@ -14,6 +14,12 @@ interface Frame {
   detail: string;
   hud: unknown;
   context: { team: number; actor: string; role: string | null };
+  perspective?: {
+    team: number | null;
+    side: "blue" | "red" | null;
+    actor: string | null;
+    source: "reported_player" | "selected_team" | "unresolved";
+  };
   players: { id: string; champion: string; team: number; role: string }[];
   model: {
     display_name: string;
@@ -31,34 +37,63 @@ interface Frame {
     >;
   };
 }
-interface DesktopBridge {
+export interface DesktopBridge {
   onFrame(callback: (frame: Frame | null) => void): () => void;
   onToggleDetails(callback: () => void): () => void;
   onInteraction(callback: (active: boolean) => void): () => void;
   configure(context: Frame["context"]): Promise<Frame>;
   openSettings(): void;
+  setPointerOver?(value: boolean): void;
 }
-const bridge = (window as Window & { riftDesktop?: DesktopBridge }).riftDesktop;
+const desktopBridge = (window as Window & { riftDesktop?: DesktopBridge }).riftDesktop;
 const store = createHudStore();
 const settingsWindow = new URLSearchParams(location.search).has("settings");
 const position =
   new URLSearchParams(location.search).get("position") === "top-left" ? "top-left" : "top-right";
 
-export function Runtime() {
+export function Runtime({
+  bridge = desktopBridge,
+  settings = settingsWindow,
+}: {
+  bridge?: DesktopBridge;
+  settings?: boolean;
+} = {}) {
   const [frame, setFrame] = useState<Frame | null>(null);
-  const [settings, setSettings] = useState(settingsWindow);
-  const [interactive, setInteractive] = useState(!bridge);
+  const [interactive, setInteractive] = useState(false);
   const [error, setError] = useState("");
   const [updating, setUpdating] = useState(false);
   const selecting = useRef(false);
   const receiveFrame = useRef<(next: Frame | null) => void>(() => {});
+  const side = frame?.perspective?.side;
+  const sideLabel = side === "red" ? "Red side" : side === "blue" ? "Blue side" : "Side unresolved";
+  useEffect(() => {
+    if (settings || !bridge?.setPointerOver) return;
+    let over = false;
+    const setOver = (value: boolean) => {
+      if (over !== value) {
+        over = value;
+        bridge.setPointerOver?.(value);
+      }
+    };
+    const move = (event: MouseEvent) => setOver(
+      event.target instanceof Element && !!event.target.closest(
+        ".macro-hud, .hud-details-panel:not([hidden]), .runtime-toolbar",
+      ),
+    );
+    const leave = () => setOver(false);
+    window.addEventListener("mousemove", move, {passive: true});
+    window.addEventListener("mouseleave", leave);
+    return () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseleave", leave);
+      leave();
+    };
+  }, [bridge, settings]);
   useEffect(() => {
     let session = "";
     let latestVersion = -1;
     let latestSession = "";
     let stopped = false;
-    let timer: ReturnType<typeof setTimeout>;
-    const controller = new AbortController();
     const receive = (next: Frame | null) => {
       if (stopped || selecting.current) return;
       if (!next || next.schema !== "macro-hud-frame-v1") {
@@ -79,16 +114,6 @@ export function Runtime() {
       } else store.setNotice(next.message, next.detail);
     };
     receiveFrame.current = receive;
-    const poll = async () => {
-      try {
-        const response = await fetch("/api/hud", { signal: controller.signal, cache: "no-store" });
-        if (!response.ok) throw Error("HUD backend unavailable");
-        receive(await response.json());
-      } catch {
-        if (!stopped) store.setConnection("reconnecting");
-      }
-      if (!stopped) timer = setTimeout(poll, 1000);
-    };
     const cleanup = bridge
       ? [
           bridge.onFrame(receive),
@@ -96,43 +121,36 @@ export function Runtime() {
           bridge.onInteraction(setInteractive),
         ]
       : [];
-    if (!bridge) void poll();
     return () => {
       stopped = true;
-      controller.abort();
-      clearTimeout(timer);
       cleanup.forEach((fn) => fn());
     };
-  }, []);
-  const configure = useCallback(async (context: Frame["context"]) => {
-    if (selecting.current) return;
-    selecting.current = true;
-    setUpdating(true);
-    setError("");
-    // Withdraw the previous player's recommendation immediately, before the request returns.
-    store.setNotice("Updating your player", "Waiting for the selected role's next read.");
-    try {
-      let next: Frame;
-      if (bridge) next = await bridge.configure(context);
-      else {
-        const result = await fetch("/api/context", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(context),
-        });
-        if (!result.ok) throw Error("Selection was rejected. Refresh the observed player list.");
-        next = await result.json();
+  }, [bridge]);
+  const configure = useCallback(
+    async (context: Frame["context"]) => {
+      if (selecting.current) return;
+      selecting.current = true;
+      setUpdating(true);
+      setError("");
+      // Withdraw the previous player's recommendation immediately, before the request returns.
+      store.setNotice("Updating your player", "Waiting for the selected role's next read.");
+      try {
+        if (!bridge) throw Error("The desktop host is unavailable");
+        const next = await bridge.configure(context);
+        selecting.current = false;
+        receiveFrame.current(next);
+      } catch (cause) {
+        setError(String(cause));
+        store.setConnection("offline");
+      } finally {
+        selecting.current = false;
+        setUpdating(false);
       }
-      selecting.current = false;
-      receiveFrame.current(next);
-    } catch (cause) {
-      setError(String(cause));
-      store.setConnection("offline");
-    } finally {
-      selecting.current = false;
-      setUpdating(false);
-    }
-  }, []);
+    },
+    [bridge],
+  );
+  if (!bridge)
+    return <main className="runtime-settings">Launch the desktop HUD with rift hud.</main>;
   if (settings)
     return (
       <main className="runtime-settings">
@@ -141,14 +159,13 @@ export function Runtime() {
             <small>OFFLINE RIFT</small>
             <h1>Coach settings</h1>
           </div>
-          {!settingsWindow && (
-            <button aria-label="Close settings" onClick={() => setSettings(false)}>
-              <X size={18} />
-            </button>
-          )}
         </header>
         <p className="runtime-muted">
           The team direction and your role specialist use the selected six-policy coach.
+        </p>
+        <p className="runtime-side" data-side={side ?? "unknown"}>
+          {sideLabel} · {frame?.perspective?.source === "reported_player" ? "Reported by League"
+            : frame?.perspective?.source === "selected_team" ? "Selected team view" : "Waiting for player identity"}
         </p>
         {frame ? (
           <>
@@ -160,10 +177,13 @@ export function Runtime() {
             <label>
               Player
               <select
+                aria-label="Player"
                 disabled={updating}
                 value={frame.context.actor}
                 onChange={(event) =>
-                  void configure({ ...frame.context, actor: event.target.value, role: null })
+                  void configure({ ...frame.context,
+                    team: frame.perspective?.team ?? frame.context.team,
+                    actor: event.target.value, role: null })
                 }
               >
                 <option value="active">My active player</option>
@@ -178,6 +198,7 @@ export function Runtime() {
             <label>
               Your role
               <select
+                aria-label="Your role"
                 disabled={updating || frame.context.actor === "team"}
                 value={frame.context.role ?? ""}
                 onChange={(event) =>
@@ -202,6 +223,7 @@ export function Runtime() {
               <label>
                 Team
                 <select
+                  aria-label="Team"
                   disabled={updating}
                   value={frame.context.team}
                   onChange={(event) =>
@@ -269,16 +291,19 @@ export function Runtime() {
     );
   return (
     <>
-      <MacroHUD store={store} position={position} />
+      <MacroHUD store={store} position={position} enableKeyboard={interactive} detailsShortcut="Control+Alt+M" />
       <div className="runtime-toolbar" data-position={position}>
         <span title={frame?.model.fingerprint}>
           {frame?.model.display_name ?? "Connecting to coach"}
           {interactive && bridge ? " · INTERACTIVE" : ""}
         </span>
+        <span className="runtime-side" data-side={side ?? "unknown"} aria-label="Team perspective">
+          {sideLabel}
+        </span>
         <button
           aria-label="Open coach settings"
           title="Coach settings · Ctrl+Alt+S"
-          onClick={() => (bridge ? bridge.openSettings() : setSettings(true))}
+          onClick={() => bridge.openSettings()}
         >
           <Settings size={13} />
         </button>

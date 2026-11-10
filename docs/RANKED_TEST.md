@@ -13,7 +13,7 @@ From the repository root, in one terminal:
 ```bash
 .venv/bin/rift verify
 RIFT_SESSION="data/research/ranked-$(date -u +%Y%m%dT%H%M%SZ)"
-.venv/bin/rift hud --serve-only --actor active --role BOTTOM --interval 5 \
+.venv/bin/rift hud --actor active --role BOTTOM --interval 5 \
   --capture-session "$RIFT_SESSION"
 ```
 

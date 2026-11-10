@@ -4,6 +4,26 @@ import { MacroHUD } from "../../../production/frontend/macro-hud/src/MacroHUD";
 import { createHudStore } from "../../../production/frontend/macro-hud/src/store";
 import { SCENARIOS } from "../../fixtures/macro-hud/scenarios";
 
+it("stops countdown wakeups at zero and clears the remaining expiry on teardown", () => {
+  vi.useFakeTimers();
+  const store = createHudStore({ now: () => Date.now() });
+  render(<MacroHUD store={store} />);
+  act(() => {
+    store.ingest({
+      ...SCENARIOS.baron,
+      macro: { ...SCENARIOS.baron.macro!, timer: "00:02" },
+      valid_for_ms: 60000,
+    });
+    vi.advanceTimersByTime(17);
+  });
+  expect(vi.getTimerCount()).toBe(2);
+  act(() => vi.advanceTimersByTime(2100));
+  expect(screen.getByRole("timer").textContent).toBe("NOW");
+  expect(vi.getTimerCount()).toBe(1);
+  store.dispose();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
 it("defaults to unverified metrics and supports keyboard expansion without hijacking form navigation", () => {
   vi.useFakeTimers();
   const store = createHudStore();

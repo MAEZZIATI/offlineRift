@@ -49,6 +49,15 @@ button {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+.runtime-toolbar .runtime-side {
+  flex-shrink: 0;
+}
+.runtime-side[data-side="blue"] {
+  color: #60a5fa;
+}
+.runtime-side[data-side="red"] {
+  color: #fb7185;
+}
 .runtime-settings {
   max-width: 520px;
   min-height: 100vh;

@@ -13,5 +13,6 @@ contextBridge.exposeInMainWorld(
     onInteraction: (callback) => subscribe("rift:interaction", callback),
     configure: (context) => ipcRenderer.invoke("rift:configure", context),
     openSettings: () => ipcRenderer.send("rift:settings"),
+    setPointerOver: (value) => ipcRenderer.send("rift:pointer", value === true),
   }),
 );

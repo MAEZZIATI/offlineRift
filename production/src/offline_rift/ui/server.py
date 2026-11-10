@@ -11,7 +11,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import urlsplit
 
 from offline_rift.inference.transport import TRANSPORTS
 from offline_rift.ui.service import LiveHudService
@@ -23,6 +23,7 @@ class HudServer(ThreadingHTTPServer):
 
     def __init__(self, dashboard: LiveHudService, port: int = 8765):
         self.dashboard = dashboard
+        self.desktop_stopping = threading.Event()
         static = files("offline_rift.ui").joinpath("static")
         self.assets = {
             "/": (static.joinpath("index.html").read_bytes(), "text/html; charset=utf-8")
@@ -32,6 +33,15 @@ class HudServer(ThreadingHTTPServer):
                 mime = mimetypes.guess_type(asset.name)[0] or "application/octet-stream"
                 self.assets[f"/assets/{asset.name}"] = (asset.read_bytes(), mime)
         super().__init__(("127.0.0.1", port), HudHandler)
+
+    def stop_desktop(self):
+        # A Windows child outlives its WSL process proxy when Ctrl+C interrupts it.
+        # The lifetime connection reaches the actual Electron main process.
+        self.desktop_stopping.set()
+
+    def server_close(self):
+        self.stop_desktop()
+        super().server_close()
 
 
 class HudHandler(BaseHTTPRequestHandler):
@@ -60,29 +70,26 @@ class HudHandler(BaseHTTPRequestHandler):
         if not self._trusted():
             return
         route = urlsplit(self.path).path
-        if route == "/api/hud":
+        if route == "/api/lifecycle":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            try:
+                self.wfile.write(b"ready\n")
+                self.wfile.flush()
+                while not self.server.desktop_stopping.wait(5):
+                    self.wfile.write(b"alive\n")
+                    self.wfile.flush()
+                self.wfile.write(b"shutdown\n")
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+        elif route == "/api/hud":
             self._send(
                 json.dumps(self.server.dashboard.frame(), allow_nan=False).encode(),
                 "application/json",
             )
-        elif route == "/api/state":
-            query = parse_qs(urlsplit(self.path).query)
-            if set(query) - {"team", "actor", "role"} or any(
-                len(values) != 1 for values in query.values()
-            ):
-                self.send_error(400)
-                return
-            try:
-                team = int(query["team"][0]) if "team" in query else None
-                actor = query.get("actor", [None])[0]
-                role = query.get("role", [None])[0]
-                payload = json.dumps(
-                    self.server.dashboard.state(team=team, actor=actor, role=role), allow_nan=False
-                ).encode()
-            except (ValueError, KeyError):
-                self.send_error(400)
-                return
-            self._send(payload, "application/json; charset=utf-8")
         elif route in self.server.assets:
             self._send(*self.server.assets[route])
         else:
@@ -129,9 +136,6 @@ class HudHandler(BaseHTTPRequestHandler):
 def add_ui_arguments(parser: argparse.ArgumentParser):
     from rift_common.actions import ROLES
 
-    parser.add_argument(
-        "--serve-only", action="store_true", help="Serve the HUD without launching a desktop host"
-    )
     parser.add_argument("--desktop", type=Path, help="Override the native HUD executable")
     parser.add_argument("--position", choices=("top-right", "top-left"), default="top-right")
     parser.add_argument("--team", type=int, choices=(100, 200), default=100)
@@ -169,7 +173,6 @@ def run_hud(
     transport="auto",
     ca_bundle=None,
     capture_session=None,
-    serve_only=False,
     desktop=None,
     position="top-right",
 ):
@@ -200,29 +203,35 @@ def run_hud(
             raise TypeError("The Macro HUD requires a completed six-policy coach bundle")
         dashboard = LiveHudService(client, model_dir=model_dir)
         with HudServer(dashboard, port) as server:
-            print(f"Offline Rift HUD: http://127.0.0.1:{server.server_port}", flush=True)
+            print("Starting Offline Rift desktop HUD", flush=True)
             print(f"Game transport: {client.source.transport}. Press Ctrl+C to stop.", flush=True)
             if capture_session is not None:
                 print(f"Session recording: {Path(capture_session).resolve()}", flush=True)
             print(f"Selected coach: {Path(model_dir).resolve()}", flush=True)
-            if serve_only:
-                server.serve_forever(poll_interval=0.5)
-            else:
-                thread = threading.Thread(target=server.serve_forever, daemon=True)
-                thread.start()
-                process = None
-                try:
-                    process = launch_desktop(
-                        server.server_port, executable=desktop, position=position
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            process = None
+            try:
+                process = launch_desktop(server.server_port, executable=desktop, position=position)
+                exit_code = process.wait()
+                if exit_code != 0:
+                    raise RuntimeError(
+                        f"Native HUD exited with code {exit_code}. See the Electron error above."
                     )
-                    if process.wait() != 0:
-                        raise RuntimeError("Native HUD exited with an error")
+            finally:
+                server.stop_desktop()
+                try:
+                    if process is not None:
+                        import subprocess
+
+                        try:
+                            process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            process.terminate()
+                            process.wait(timeout=5)
                 finally:
-                    if process is not None and process.poll() is None:
-                        process.terminate()
-                        process.wait(timeout=10)
                     server.shutdown()
-                    thread.join(timeout=10)
+                    thread.join(timeout=5)
     except KeyboardInterrupt:
         pass
     finally:
@@ -255,7 +264,6 @@ def main():
             transport=args.transport,
             ca_bundle=args.ca_bundle,
             capture_session=args.capture_session,
-            serve_only=args.serve_only,
             desktop=args.desktop,
             position=args.position,
         )

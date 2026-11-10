@@ -9,21 +9,11 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build --mode hud",
-    "build:lib": "tsc --project tsconfig.lib.json && vite build --mode library",
-    "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run",
-    "format:check": "prettier --check src package.json tsconfig.json tsconfig.lib.json vite.config.ts index.html README.md \"../../../tests/frontend/macro-hud/*.{ts,tsx,json}\" \"../../../tests/fixtures/macro-hud/*.ts\"",
+    "format:check": "prettier --check src package.json tsconfig.json vite.config.ts index.html README.md \"../../../tests/frontend/macro-hud/*.{ts,tsx,json}\" \"../../../tests/fixtures/macro-hud/*.ts\"",
     "test:browser": "playwright test --config ../../../tests/frontend/macro-hud/playwright.config.ts",
-    "build:preview": "vite build",
     "package:win": "npm run build && node desktop/package.mjs win32",
     "package:linux": "npm run build && node desktop/package.mjs linux"
-  },
-  "exports": {
-    ".": {
-      "types": "./dist-lib/types/index.d.ts",
-      "import": "./dist-lib/macro-hud.js"
-    },
-    "./style.css": "./dist-lib/macro-hud.css"
   },
   "dependencies": {
     "lucide-react": "^0.468.0"

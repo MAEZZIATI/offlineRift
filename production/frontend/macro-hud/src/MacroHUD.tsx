@@ -42,6 +42,7 @@ export interface MacroHUDProps {
   metricsMode?: MetricsMode;
   /** Only handles Tab in this web view. Global game hotkeys must be forwarded by the host. */
   enableKeyboard?: boolean;
+  detailsShortcut?: "Tab" | "Control+Alt+M";
 }
 
 const Header = memo(function Header({ store, mode }: { store: HudStore; mode: MetricsMode }) {
@@ -88,10 +89,15 @@ const Countdown = memo(function Countdown({ store }: { store: HudStore }) {
       setRemaining(null);
       return;
     }
-    const tick = () => setRemaining(Math.max(0, Math.ceil((timer.deadline - store.now()) / 1000)));
+    let handle: number | undefined;
+    const tick = () => {
+      const milliseconds = Math.max(0, timer.deadline - store.now());
+      setRemaining(Math.ceil(milliseconds / 1000));
+      // Wake only when the displayed second changes; stop completely at zero.
+      if (milliseconds > 0) handle = window.setTimeout(tick, (milliseconds % 1000 || 1000) + 1);
+    };
     tick();
-    const handle = window.setInterval(tick, 250);
-    return () => clearInterval(handle);
+    return () => clearTimeout(handle);
   }, [timer, store]);
   const label =
     remaining === null
@@ -359,6 +365,7 @@ export const MacroHUD = memo(function MacroHUD({
   position = "top-right",
   metricsMode = "unverified",
   enableKeyboard = true,
+  detailsShortcut = "Tab",
 }: MacroHUDProps) {
   const phase = useHudValue(store, (state) => state.phase);
   const urgency = useHudValue(store, (state) => state.data?.urgency ?? "normal");
@@ -430,7 +437,7 @@ export const MacroHUD = memo(function MacroHUD({
           type="button"
           aria-expanded={expanded}
           aria-controls={id}
-          aria-keyshortcuts="Tab"
+          aria-keyshortcuts={detailsShortcut}
           onClick={() => store.toggleDetails()}
         >
           <span className="flex items-center gap-1.5">
@@ -438,7 +445,7 @@ export const MacroHUD = memo(function MacroHUD({
             {expanded ? "Less noise" : "The full picture"}
           </span>
           <span className="flex items-center gap-2">
-            <kbd>TAB</kbd>
+            <kbd>{detailsShortcut === "Tab" ? "TAB" : "CTRL ALT M"}</kbd>
             <ChevronDown size={13} className={expanded ? "hud-chevron-open" : ""} />
           </span>
         </button>

@@ -87,7 +87,7 @@ def test_scoped_diagnostics_use_the_selected_role(dashboard, role):
     assert scoped.model["advisory_groups"] == [role]
 
 
-def test_local_read_only_api_validates_context_and_keeps_assets_local(dashboard):
+def test_local_desktop_api_validates_context_and_keeps_assets_local(dashboard):
     service, _ = dashboard
     with HudServer(service, 0) as server:
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -99,12 +99,19 @@ def test_local_read_only_api_validates_context_and_keeps_assets_local(dashboard)
                 with opener.open(origin + asset) as response:
                     assert response.status == 200 and response.read()
                     assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
-            with opener.open(origin + "/api/state?team=100&actor=team") as response:
+            with opener.open(origin + "/api/hud") as response:
                 result = json.load(response)
-                assert result["recommendation"]["actor"] == "team"
+                assert result["schema"] == "macro-hud-frame-v1"
             for request, code in (
-                (Request(origin + "/api/state?team=100&role=invalid"), 400),
-                (Request(origin + "/api/state?team=100&team=200"), 400),
+                (Request(origin + "/api/state"), 404),
+                (
+                    Request(
+                        origin + "/api/context",
+                        data=b'{"role":"invalid"}',
+                        headers={"Content-Type": "application/json"},
+                    ),
+                    400,
+                ),
                 (
                     Request(origin + "/api/state", headers={"Origin": "https://foreign.example"}),
                     403,
@@ -115,6 +122,26 @@ def test_local_read_only_api_validates_context_and_keeps_assets_local(dashboard)
                     opener.open(request)
                 assert error.value.code == code
         finally:
+            server.shutdown()
+            thread.join(timeout=5)
+
+
+def test_lifetime_connection_delivers_shutdown_even_after_the_process_proxy_exits(dashboard):
+    service, _ = dashboard
+    with HudServer(service, 0) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            opener = build_opener(ProxyHandler({}))
+            with opener.open(
+                f"http://127.0.0.1:{server.server_port}/api/lifecycle", timeout=2
+            ) as response:
+                assert response.readline() == b"ready\n"
+                server.stop_desktop()
+                assert response.readline() == b"shutdown\n"
+                assert response.read() == b""
+        finally:
+            server.stop_desktop()
             server.shutdown()
             thread.join(timeout=5)
 

@@ -1,10 +1,16 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
-import { Runtime } from "../../../production/frontend/macro-hud/src/runtime";
+import {
+  Runtime,
+  type Frame,
+  type DesktopBridge,
+} from "../../../production/frontend/macro-hud/src/runtime";
 
 it("withdraws old advice during selection and ignores delayed responses for the previous role", async () => {
   vi.useFakeTimers();
-  const frame = (version: number, role: string, action: string) => ({
+  const frame = (version: number, role: string, action: string): Frame => ({
+    message: "",
+    detail: "",
     schema: "macro-hud-frame-v1",
     session_id: "fixture",
     context_version: version,
@@ -38,21 +44,32 @@ it("withdraws old advice during selection and ignores delayed responses for the 
   const old = frame(0, "TOP", "Farm top lane");
   const next = frame(1, "JUNGLE", "Clear jungle camps");
   let finishSelection!: (value: unknown) => void;
-  const fetcher = vi.fn(async (_url: string, options?: RequestInit) => {
-    if (options?.method === "POST")
-      return new Promise((resolve) => {
-        finishSelection = resolve;
-      });
-    return { ok: true, json: async () => old };
-  });
-  vi.stubGlobal("fetch", fetcher);
+  let receive!: (value: Frame | null) => void;
+  const bridge: DesktopBridge = {
+    onFrame: (callback) => {
+      receive = callback;
+      return () => {};
+    },
+    onToggleDetails: () => () => {},
+    onInteraction: () => () => {},
+    configure: vi.fn(
+      () =>
+        new Promise<Frame>((resolve) => {
+          finishSelection = resolve as (value: unknown) => void;
+        }),
+    ),
+    openSettings: vi.fn(),
+  };
   try {
-    render(<Runtime />);
+    const view = render(<Runtime bridge={bridge} />);
+    act(() => receive(old));
     await act(async () => {
       await vi.advanceTimersByTimeAsync(20);
     });
     expect(screen.getByText("Farm top lane")).toBeTruthy();
     fireEvent.click(screen.getByLabelText("Open coach settings"));
+    expect(bridge.openSettings).toHaveBeenCalledOnce();
+    view.rerender(<Runtime bridge={bridge} settings />);
     expect(screen.getByText("Development gate failed")).toBeTruthy();
     expect(
       screen.getByText(/Collapsed predictions.*7 validation abstentions/),
@@ -63,18 +80,20 @@ it("withdraws old advice during selection and ignores delayed responses for the 
     expect(
       (screen.getByLabelText("Your role") as HTMLSelectElement).disabled,
     ).toBe(true);
-    fireEvent.click(screen.getByLabelText("Close settings"));
+    view.rerender(<Runtime bridge={bridge} />);
+    act(() => receive(old));
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1100);
     });
     expect(screen.queryByText("Farm top lane")).toBeNull();
     expect(screen.getByText("Updating your player")).toBeTruthy();
     await act(async () => {
-      finishSelection({ ok: true, json: async () => next });
+      finishSelection(next);
       await vi.advanceTimersByTimeAsync(20);
     });
     expect(screen.getByText("Clear jungle camps")).toBeTruthy();
-    // A poll already in flight may still deliver the previous context afterward.
+    // A delayed native frame for the previous context cannot restore old advice.
+    act(() => receive(old));
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1100);
     });

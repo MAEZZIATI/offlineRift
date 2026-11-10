@@ -1,9 +1,7 @@
 # Offline Rift
 
-The optional [Macro HUD React widget](production/frontend/macro-hud/README.md) provides
-a compact team/role overlay, WebSocket and IPC consumers, and a synthetic local preview.
-It is separate from the Python dashboard; native overlay hosting and a recommendation
-event producer must be supplied by the embedding application.
+The [Macro HUD](production/frontend/macro-hud/README.md) is a native Electron overlay
+backed by the Python six-policy inference service. Run it with `rift hud`.
 
 Offline Rift is an experimental League of Legends macro coach with **six policies**:
 one team-direction model and independent TOP, JUNGLE, MIDDLE, BOTTOM and UTILITY
@@ -23,7 +21,7 @@ active-game acceptance and prospective outcome testing come later.
 | Acquisition | `production/src/offline_rift/collection.py`, `catalogs.py` | Verified accounts, bounded Riot requests, raw cache and exact-patch catalogs |
 | Learning | `production/src/offline_rift/training` | One trainer, explicit critic targets, per-scope fitting and coach assembly |
 | Serving | `production/src/offline_rift/inference` | Immutable bundle verification, six-model routing and advisory persistence |
-| Delivery | `production/src/offline_rift/ui` | Local dashboard and optional session recording |
+| Delivery | `production/src/offline_rift/ui` | Native HUD backend and optional session recording |
 | Orchestration | `rift` / `workflow.py` | Collect, build, train, verify and activate |
 | Research | `research/src/rift_research` | Optional offline comparisons, diagnostics, following evidence and synthesis |
 | Verification | `tests` | All synthetic fixtures and tests; no real API requests |
@@ -98,15 +96,15 @@ casts and fine mechanics are not invented. Current formation labels are not stra
 recommendations. Historical role metadata is retrospective; live role selection must
 be reported or explicit. Macro options are reconstructed behavior, not verified intent.
 
-The HUD loads the selected completed six-policy coach from workflow state. To serve
-the browser HUD at `http://127.0.0.1:8765`:
+The desktop HUD loads the selected completed six-policy coach from workflow state:
 
 ```bash
-.venv/bin/rift hud --serve-only --actor active --role JUNGLE --interval 5
+.venv/bin/rift hud --actor active --role JUNGLE --interval 5
 ```
 
-For the native always-on-top overlay, package the desktop host as described in the
-[HUD guide](production/frontend/macro-hud/README.md), then omit `--serve-only`.
+Package the desktop host as described in the
+[HUD guide](production/frontend/macro-hud/README.md). Ctrl+C closes both the backend
+and the Windows HUD, including when launched from WSL.
 `rift ui` remains an alias. Override the coach with `--model PATH` or the desktop
 executable with `--desktop PATH`. Settings expose the loaded coach, all six policies,
 support and development diagnostics, and explicit player/role selection. Advice

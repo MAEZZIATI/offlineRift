@@ -12,36 +12,45 @@ from offline_rift.ui.server import HudServer
 
 BROWSER = os.environ.get("RIFT_TEST_BROWSER")
 NODE = os.environ.get("RIFT_TEST_NODE", "node")
+BRIDGE = r"""
+let receive;
+window.fixtureReceive = (frame) => receive?.(frame);
+window.riftDesktop = {
+  onFrame(callback) {
+    receive = callback;
+    fetch('/api/hud').then(r => r.json()).then(frame => receive?.(frame));
+    return () => {receive = null;};
+  },
+  onToggleDetails: () => () => {},
+  onInteraction: () => () => {},
+  configure: async (context) => {
+    const response = await fetch('/api/context', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(context)});
+    if (!response.ok) throw Error('Selection rejected');
+    return response.json();
+  },
+  openSettings: () => location.assign('/?settings=1'),
+};
+"""
 CHECKS = r"""
-(async () => {
- const report = document.createElement('pre'); report.id='browser-result'; report.hidden=true;
- const wait=async(fn)=>{for(let i=0;i<200;i++){if(fn())return;await new Promise(r=>setTimeout(r,25));}throw Error('HUD timeout: '+document.body.textContent);};
- const check=(ok,message)=>{if(!ok)throw Error(message);};
- try {
-  await wait(()=>document.querySelector('.hud-action-title'));
-  check(document.querySelector('.hud-action-title').textContent==='Rotate toward mid','Actual macro payload');
-  check(!document.body.textContent.includes('+14.2%'),'No fabricated impact');
-  check(document.body.textContent.includes('Choose your role'),'Missing role is explicit');
-  document.querySelector('[aria-label="Open coach settings"]').click();
-  await wait(()=>document.querySelector('.runtime-settings select'));
-  check(document.querySelector('.runtime-model').textContent.includes('6 POLICIES'),'Selected six-policy model');
-  check(document.querySelectorAll('.runtime-policies > div').length===6,'All six policies');
-  const select=document.querySelectorAll('select')[1];
-  select.value='JUNGLE';select.dispatchEvent(new Event('change',{bubbles:true}));
-  await wait(()=>document.querySelectorAll('select')[1].value==='JUNGLE');
-  document.querySelector('[aria-label="Close settings"]').click();
-  await wait(()=>document.querySelector('.hud-role-action')?.textContent==='Clear jungle camps');
-  document.querySelector('.hud-expand').click();
-  await wait(()=>document.querySelector('.hud-confidence'));
-  check(document.querySelector('.hud-confidence').textContent.includes('Uncalibrated'),'No fake confidence');
-  check(document.documentElement.scrollWidth<=innerWidth,'No horizontal overflow');
-  window.fetch=async()=>new Response(JSON.stringify({schema:'macro-hud-frame-v1',session_id:'fixture',context_version:2,status:'waiting_for_game',message:'Waiting for League of Legends',detail:'No game',hud:null,context:{team:100,actor:'active',role:null},players:[],model:{display_name:'fixture-coach',fingerprint:'abc',policy_count:6,policies:{}}}),{status:200,headers:{'Content-Type':'application/json'}});
-  await wait(()=>document.querySelector('.hud-empty h2')?.textContent==='Waiting for League of Legends');
-  check(!document.querySelector('.hud-action-title'),'Advice withdrawn when game unavailable');
-  report.textContent=JSON.stringify({passed:true});
- }catch(error){report.textContent=JSON.stringify({passed:false,error:String(error)});}
- document.body.append(report);
-})();
+await page.goto(url);
+await page.locator('.hud-action-title').waitFor();
+assert.equal(await page.locator('.hud-action-title').textContent(), 'Rotate toward mid');
+assert.equal((await page.locator('body').textContent()).includes('+14.2%'), false);
+await page.getByText('Choose your role in HUD settings').waitFor();
+await page.getByLabel('Open coach settings').click();
+await page.locator('.runtime-settings select').first().waitFor();
+assert.equal((await page.locator('.runtime-model').textContent()).includes('6 POLICIES'), true);
+assert.equal(await page.locator('.runtime-policies > div').count(), 6);
+await page.getByLabel('Your role', {exact:true}).selectOption('JUNGLE');
+await page.waitForFunction(() => !document.querySelectorAll('select')[1].disabled);
+await page.goto(url);
+await page.getByText('Clear jungle camps', {exact:true}).waitFor();
+await page.locator('.hud-expand').click();
+await page.getByText('Uncalibrated', {exact:true}).waitFor();
+assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+await page.evaluate(() => window.fixtureReceive({schema:'macro-hud-frame-v1',session_id:'fixture',context_version:2,status:'waiting_for_game',message:'Waiting for League of Legends',detail:'No game',hud:null,context:{team:100,actor:'active',role:null},players:[],model:{display_name:'fixture-coach',fingerprint:'abc',policy_count:6,policies:{}}}));
+await page.getByRole('heading', {name:'Waiting for League of Legends'}).waitFor();
+assert.equal(await page.locator('.hud-action-title').count(), 0);
 """
 
 
@@ -105,6 +114,7 @@ def test_compiled_hud_model_role_and_withdrawal(tmp_path, width, height):
             # timer-based assertions before the store's animation frame is painted.
             script = f"""
 import {{ chromium }} from {json.dumps(playwright.as_uri())};
+import assert from "node:assert/strict";
 const [executablePath, url, screenshot, width, height] = process.argv.slice(2);
 const browser = await chromium.launch({{
   executablePath, headless: true,
@@ -112,9 +122,10 @@ const browser = await chromium.launch({{
 }});
 try {{
   const page = await browser.newPage({{viewport: {{width: +width, height: +height}}}});
-  await page.goto(url);
-  await page.evaluate({json.dumps(CHECKS)});
-  console.log(await page.locator('#browser-result').textContent());
+  page.setDefaultTimeout(5000);
+  await page.addInitScript({json.dumps(BRIDGE)});
+  {CHECKS}
+  console.log(JSON.stringify({{passed: true}}));
   await page.screenshot({{path: screenshot}});
 }} finally {{ await browser.close(); }}
 """

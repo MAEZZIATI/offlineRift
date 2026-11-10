@@ -506,7 +506,6 @@ def main():
         )
         if command in {"hud", "ui"}:
             child.add_argument("--port", type=int, default=8765)
-            child.add_argument("--serve-only", action="store_true")
             child.add_argument("--desktop", type=Path)
             child.add_argument("--position", choices=("top-right", "top-left"), default="top-right")
         else:
@@ -641,7 +640,6 @@ def main():
                     role=args.role,
                     interval=args.interval,
                     port=args.port,
-                    serve_only=args.serve_only,
                     desktop=args.desktop,
                     position=args.position,
                     transport=args.transport,

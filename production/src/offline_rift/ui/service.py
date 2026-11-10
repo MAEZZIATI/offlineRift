@@ -204,6 +204,17 @@ class LiveHudService:
                 "role": self.client.role,
             }
             result = raw.get("recommendation", {})
+            selected_actor = (
+                raw["active_player"] if self.client.actor == "active"
+                else result.get("actor", self.client.actor)
+            )
+            selected_player = next(
+                (player for player in raw["players"] if player["id"] == selected_actor), None
+            )
+            perspective_team = (
+                selected_player["team"] if selected_player
+                else self.client.team if self.client.actor == "team" else None
+            )
             frame = {
                 "schema": "macro-hud-frame-v1",
                 "session_id": self.session_id,
@@ -214,6 +225,13 @@ class LiveHudService:
                 "valid_for_ms": min(60000, raw["valid_for_ms"]),
                 "hud": None,
                 "context": context,
+                "perspective": {
+                    "team": perspective_team,
+                    "side": {100: "blue", 200: "red"}.get(perspective_team),
+                    "actor": selected_player["id"] if selected_player else None,
+                    "source": "reported_player" if selected_player else "selected_team"
+                    if self.client.actor == "team" else "unresolved",
+                },
                 "players": raw["players"],
                 "active_player": raw["active_player"],
                 "model": {
