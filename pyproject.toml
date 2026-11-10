@@ -35,7 +35,7 @@ where = ["production/src", "common/src"]
 include = ["offline_rift*", "rift_common*"]
 
 [tool.setuptools.package-data]
-"offline_rift.ui" = ["static/*.html", "static/*.css", "static/*.js"]
+"offline_rift.ui" = ["static/*.html", "static/*.css", "static/*.js", "static/assets/*.js", "static/assets/*.css"]
 "rift_common" = ["objective_rules.json"]
 
 [tool.pytest.ini_options]

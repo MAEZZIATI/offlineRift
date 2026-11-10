@@ -121,6 +121,37 @@ def test_six_real_models_are_scope_trained_reload_route_and_detect_corruption(
         == file_digest(protocol)
     )
     coach = MacroCoach(result["bundle"])
+    # Exercise the HUD with six saved/reloaded Torch networks and a synthetic live
+    # observation. This checks serving composition without contacting game APIs.
+    from unittest.mock import Mock
+
+    from offline_rift.inference.live_client import LiveClientInference
+    from offline_rift.ui.service import LiveHudService
+    from test_live import live_data
+
+    client = LiveClientInference(policy=coach, session=Mock())
+    client.fetch_live_data = lambda: live_data(180)
+    try:
+        hud = LiveHudService(client, model_dir=result["bundle"])
+        for role in POLICY_SCOPES[1:]:
+            frame = hud.configure({"role": role})
+            assert frame["model"]["policy_count"] == 6
+            assert set(frame["model"]["policies"]) == set(POLICY_SCOPES)
+            assert (
+                frame["model"]["policies"][role]["development_gate_passed"]
+                == (result["selected"][role]["development_gate_passed"])
+            )
+            assert frame["status"] in {"live", "insufficient_support"}
+            if frame["hud"]:
+                assert frame["hud"]["role"]["player_role"] == role
+                assert frame["hud"]["telemetry"]["ai_confidence"] is None
+                assert "winrate_impact" not in (frame["hud"]["macro"] or {})
+        team_frame = hud.configure({"actor": "team"})
+        assert team_frame["status"] in {"live", "insufficient_support"}
+        if team_frame["hud"]:
+            assert team_frame["hud"]["role"] is None
+    finally:
+        client.close()
     arrays, _ = load_dataset(path)
     predictions, _ = coach.predict_batch(
         arrays["observations"], arrays["groups"], arrays["action_masks"]

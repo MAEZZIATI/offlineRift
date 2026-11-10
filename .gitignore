@@ -10,3 +10,8 @@ workflow.json
 /d3rlpy_logs/
 build/
 dist/
+node_modules/
+dist-lib/
+playwright-report/
+test-results/
+release/

@@ -1,102 +1,19 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="dark">
-  <meta name="description" content="Offline Rift, an independent local macro companion.">
-  <title>Offline Rift · Live overview</title>
-  <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/app.css">
-  <script src="/app.js" defer></script>
-</head>
-<body>
-  <a class="skip-link" href="#main">Skip to live overview</a>
-  <div class="shell">
-    <header class="topbar">
-      <a class="brand" href="/" aria-label="Offline Rift home">
-        <svg class="brand-mark" width="32" height="38" viewBox="0 0 32 38" fill="none" aria-hidden="true"><path d="M16 2 29 9v20l-13 7L3 29V9Z"/><path d="m10 26 6-15 6 15M12 21h8M16 2v5m0 24v5"/></svg>
-        <span>OFFLINE RIFT<small>INDEPENDENT MACRO COMPANION</small></span>
-      </a>
-      <span class="local-label">ON YOUR MACHINE</span>
-      <span class="connection" id="connection" role="status"><span class="dot" aria-hidden="true"></span><span id="connection-text">Connecting</span></span>
-    </header>
-
-    <main id="main" tabindex="-1">
-      <div class="page-heading">
-        <div><p class="eyebrow">LIVE SESSION</p><h1>Live overview<span class="heading-dot">.</span></h1></div>
-        <div class="view-controls" aria-label="Display controls">
-          <button id="focus" class="control-button" type="button" aria-pressed="false" aria-keyshortcuts="f"><svg width="15" height="15" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M7 3H3v4m10-4h4v4M3 13v4h4m10-4v4h-4"/></svg><span>Focus view</span><kbd>F</kbd></button>
-          <button id="pause" class="control-button" type="button" aria-pressed="false" aria-keyshortcuts="p"><span class="pause-symbol" aria-hidden="true"></span><span id="pause-label">Pause</span><kbd>P</kbd></button>
-        </div>
-      </div>
-
-      <section class="session-bar" aria-label="Session and perspective">
-        <fieldset class="team-picker"><legend>YOUR SIDE</legend>
-          <label><input type="radio" name="team" value="100" checked><span><i class="team-dot blue" aria-hidden="true"></i>Blue side</span></label>
-          <label><input type="radio" name="team" value="200"><span><i class="team-dot red" aria-hidden="true"></i>Red side</span></label>
-        </fieldset>
-        <div class="loaded-model"><span class="eyebrow">LOADED MODEL</span><span id="model-kind">Reading model…</span></div>
-        <span class="experiment-label"><span aria-hidden="true">◇</span> Experimental</span>
-      </section>
-
-      <section class="actor-controls" aria-label="Decision subject">
-        <label for="actor"><span class="eyebrow">ADVICE FOR</span><select id="actor"><option value="active">Me · identify from game</option><option value="team">Selected team</option></select></label>
-        <label for="role"><span class="eyebrow">PLAYER ROLE</span><select id="role"><option value="">Use reported role</option><option value="TOP">Top</option><option value="JUNGLE">Jungle</option><option value="MIDDLE">Mid</option><option value="BOTTOM">Bottom / ADC</option><option value="UTILITY">Support</option></select></label>
-        <p id="actor-hint">Select your player and role for individual decisions, or choose the team view.</p>
-      </section>
-      <aside id="model-warning" class="notice" hidden><span aria-hidden="true">!</span><p id="model-warning-text"></p></aside>
-
-      <div class="dashboard">
-        <section class="decision panel" aria-labelledby="decision-title">
-          <div class="panel-top"><h2 class="eyebrow">SUGGESTED NEXT ACTION</h2><span class="tag" id="decision-tag">WAITING</span></div>
-          <div class="decision-body" role="status" aria-live="polite" aria-atomic="true">
-            <svg class="decision-emblem" width="64" height="64" viewBox="0 0 64 64" fill="none" aria-hidden="true"><path class="emblem-frame" d="M32 3 56 17v30L32 61 8 47V17Z"/><path d="m32 17 10 15-10 15-10-15Z"/><path d="M32 8v5m0 38v5M13 21l5 3m28 16 5 3M13 43l5-3m28-16 5-3"/></svg>
-            <p class="decision-kicker" id="decision-kicker">READY WHEN YOU ARE</p>
-            <h3 id="decision-title">Waiting for your game.</h3>
-            <p id="decision-description">Start a 5v5 Summoner’s Rift match. Your model will connect when the map has loaded.</p>
-            <p id="decision-check" class="decision-check" hidden></p>
-            <p id="decision-horizon" class="decision-horizon" hidden></p>
-            <p id="macro-direction" class="decision-check" hidden></p>
-          </div>
-          <div class="decision-footer"><span class="perspective"><i class="team-dot blue" id="perspective-dot" aria-hidden="true"></i><span id="perspective">Blue team perspective</span></span><span id="decision-time">No observation yet</span></div>
-        </section>
-
-        <aside class="session panel" aria-labelledby="session-title">
-          <div class="panel-top"><h2 class="eyebrow" id="session-title">MATCH CLOCK</h2><svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M10 5v5l3 2"/></svg></div>
-          <div class="game-clock" id="game-clock">--:--</div><p class="clock-label">AT LAST OBSERVATION</p>
-          <div class="freshness"><span id="observed-age">Waiting for live data</span><span id="refresh-countdown">—</span><progress id="freshness" max="1" value="0" aria-label="Observation freshness"></progress></div>
-          <dl class="session-facts">
-            <div><dt>Connection</dt><dd id="transport">Detecting</dd></div>
-            <div><dt>Refresh</dt><dd id="interval">—</dd></div>
-            <div><dt>Last check</dt><dd id="last-check">—</dd></div>
-          </dl>
-          <details class="connection-help"><summary>Not connecting?</summary><p>Keep the dashboard command running and wait for an active 5v5 match to load. On WSL, use <code>--transport windows</code> if the game runs on Windows.</p></details>
-        </aside>
-
-        <section class="options panel secondary" aria-labelledby="options-title">
-          <div class="panel-top"><h2 id="options-title">Other supported actions</h2><span class="muted small">POLICY RANKING</span></div>
-          <p class="section-note">Alternatives from the same observation. Check the map before acting.</p>
-          <ol class="alternatives" id="alternatives"><li class="empty-options">Supported actions appear when a game connects.</li></ol>
-          <details class="all-options"><summary>All actions &amp; scores</summary><div class="score-heading"><span>ACTION</span><span id="score-label">MODEL SCORE</span></div><ol class="action-list" id="action-list"></ol><p id="score-note" class="values-note">Scores rank next actions. They are not win probabilities.</p></details>
-        </section>
-
-        <section class="context panel secondary" aria-labelledby="context-title">
-          <div class="panel-top"><h2 id="context-title">Keep the map in mind.</h2></div>
-          <p class="context-intro">A second perspective, with a partial view.</p>
-          <div class="context-group"><h3><span class="context-indicator observed" aria-hidden="true"></span>What the model can use</h3><p>Your role · Levels &amp; inventory<br>Recent public history · Objective estimates</p></div>
-          <div class="context-group"><h3><span class="context-indicator unavailable" aria-hidden="true"></span>What you need to check</h3><p>Player positions · Waves &amp; vision<br>Camp availability · Ability cooldowns</p></div>
-          <p class="context-footnote" id="observation">The policy estimates next-action values from recorded games. Winning more often has not yet been tested.</p>
-        </section>
-      </div>
-
-      <details class="model-details secondary" id="model-details"><summary><span>Model performance &amp; limitations</span><span class="summary-hint">HOW TO READ THIS</span></summary>
-        <div class="model-detail-content"><dl class="model-facts"><div><dt>Training coverage</dt><dd id="coverage">—</dd></div><div><dt>Behavior agreement</dt><dd id="agreement">—</dd></div><div><dt>Majority baseline</dt><dd id="baseline">—</dd></div><div><dt>Balanced accuracy</dt><dd id="balanced-accuracy">—</dd></div><div><dt>Macro F1</dt><dd id="macro-f1">—</dd></div></dl><div class="model-explanation"><p>These metrics diagnose reconstructed behaviors and action support. They do not estimate policy win rate or prove improvement. Objective timings are estimates.</p><p id="distribution"></p><p id="predictions"></p></div></div>
-      </details>
-      <p class="focus-note" hidden id="focus-note">Focus view is on. Press <kbd>F</kbd> or use the button above to show the full overview.</p>
-    </main>
-    <footer class="page-footer"><div><span class="footer-brand">OFFLINE RIFT</span><span>Independent community project.<br>Local processing. No session recording.</span></div><p>Offline Rift isn't endorsed by Riot Games and doesn't reflect the views or opinions of Riot Games or anyone officially involved in producing or managing Riot Games properties. Riot Games, and all associated properties are trademarks or registered trademarks of Riot Games, Inc. <a href="https://developer.riotgames.com/policies/general" target="_blank" rel="noopener noreferrer">Developer policy <span aria-hidden="true">↗</span></a></p></footer>
-  </div>
-  <noscript><p class="notice">Enable JavaScript to receive live observations.</p></noscript>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#080c14" />
+    <meta
+      name="description"
+      content="The Macro HUD. A focused, local preview of a two-level esports recommendation widget."
+    />
+    <title>The Macro HUD · Offline Rift</title>
+    <link rel="icon" href="data:," />
+    <script type="module" crossorigin src="/assets/index-BoeveZeN.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-DB8mgPb4.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
 </html>

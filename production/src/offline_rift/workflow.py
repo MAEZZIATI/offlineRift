@@ -491,7 +491,7 @@ def main():
         child.add_argument("--algorithm", choices=("cql", "bc", "iql"))
         child.add_argument("--steps", type=int)
         child.add_argument("--retrain", action="store_true")
-    for command in ("ui", "live"):
+    for command in ("hud", "ui", "live"):
         child = sub.add_parser(command)
         child.add_argument("--model", type=Path)
         child.add_argument("--team", type=int, choices=(100, 200), default=100)
@@ -504,8 +504,11 @@ def main():
             type=Path,
             help="Opt in to measured live input and advice recording",
         )
-        if command == "ui":
+        if command in {"hud", "ui"}:
             child.add_argument("--port", type=int, default=8765)
+            child.add_argument("--serve-only", action="store_true")
+            child.add_argument("--desktop", type=Path)
+            child.add_argument("--position", choices=("top-right", "top-left"), default="top-right")
         else:
             child.add_argument("--once", action="store_true")
             child.add_argument(
@@ -628,16 +631,19 @@ def main():
             model = args.model or workflow.state().get("model", {}).get("path")
             if not model:
                 raise ValueError("No next-action model; use rift train")
-            if args.command == "ui":
-                from offline_rift.ui.server import run_ui
+            if args.command in {"hud", "ui"}:
+                from offline_rift.ui.server import run_hud
 
-                run_ui(
+                run_hud(
                     model,
                     team=args.team,
                     actor=args.actor,
                     role=args.role,
                     interval=args.interval,
                     port=args.port,
+                    serve_only=args.serve_only,
+                    desktop=args.desktop,
+                    position=args.position,
                     transport=args.transport,
                     capture_session=args.capture_session,
                 )
@@ -656,5 +662,5 @@ def main():
                 ).run(max_polls=1 if args.once else None)
     except KeyboardInterrupt:
         parser.exit(130, "Interrupted; existing data and progress reports are retained.\n")
-    except (ValueError, KeyError, OSError, RuntimeError) as error:
+    except (ValueError, TypeError, KeyError, OSError, RuntimeError) as error:
         parser.exit(1, f"Error: {error}\n")

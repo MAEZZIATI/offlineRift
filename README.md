@@ -1,5 +1,10 @@
 # Offline Rift
 
+The optional [Macro HUD React widget](production/frontend/macro-hud/README.md) provides
+a compact team/role overlay, WebSocket and IPC consumers, and a synthetic local preview.
+It is separate from the Python dashboard; native overlay hosting and a recommendation
+event producer must be supplied by the embedding application.
+
 Offline Rift is an experimental League of Legends macro coach with **six policies**:
 one team-direction model and independent TOP, JUNGLE, MIDDLE, BOTTOM and UTILITY
 specialists. Every learned return target is derived from terminal team victory.
@@ -93,11 +98,21 @@ casts and fine mechanics are not invented. Current formation labels are not stra
 recommendations. Historical role metadata is retrospective; live role selection must
 be reported or explicit. Macro options are reconstructed behavior, not verified intent.
 
-Live testing is deferred. The eventual localhost UI uses:
+The HUD loads the selected completed six-policy coach from workflow state. To serve
+the browser HUD at `http://127.0.0.1:8765`:
 
 ```bash
-.venv/bin/rift ui --actor active --role JUNGLE --interval 5
+.venv/bin/rift hud --serve-only --actor active --role JUNGLE --interval 5
 ```
+
+For the native always-on-top overlay, package the desktop host as described in the
+[HUD guide](production/frontend/macro-hud/README.md), then omit `--serve-only`.
+`rift ui` remains an alias. Override the coach with `--model PATH` or the desktop
+executable with `--desktop PATH`. Settings expose the loaded coach, all six policies,
+support and development diagnostics, and explicit player/role selection. Advice
+withdraws on disconnect, expiry or unsupported state; conflicting role destinations
+are withheld. Real models have been checked with synthetic observations; live-game
+integration has not been exercised.
 
 Choose the actual role. Optional `--capture-session NEW_DIRECTORY` records measured
 inputs and served advice. [The session runbook](docs/RANKED_TEST.md) documents recording
@@ -113,6 +128,8 @@ git diff --check
 ```
 
 Optional Chromium checks use synthetic localhost fixtures via RIFT_TEST_BROWSER.
+They require the HUD's npm dependencies and Node.js 22.12+; set RIFT_TEST_NODE to
+the Node executable when it is not on PATH.
 Tests never call Riot or Data Dragon. Research is excluded from the production wheel.
 The [research guide](research/README.md) covers optional diagnostics and reporting.
 The new synthesis is [research/docs/SYNTHESIS.pdf](research/docs/SYNTHESIS.pdf).

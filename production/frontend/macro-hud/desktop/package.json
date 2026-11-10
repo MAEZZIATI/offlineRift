@@ -1,0 +1,8 @@
+{
+  "name": "offline-rift-hud-desktop",
+  "version": "0.1.0",
+  "main": "main.cjs",
+  "description": "Native click-through host for the Offline Rift Macro HUD",
+  "author": "Offline Rift",
+  "license": "UNLICENSED"
+}

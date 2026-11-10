@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "outDir": "dist-lib/types",
+    "rootDir": "src"
+  },
+  "include": [
+    "src/index.ts",
+    "src/MacroHUD.tsx",
+    "src/store.ts",
+    "src/transport.ts",
+    "src/types.ts"
+  ]
+}

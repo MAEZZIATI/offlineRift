@@ -186,9 +186,9 @@ def test_session_capture_explicit_champion_adc_and_name_redaction(tmp_path, cata
         role="BOTTOM",
         capture_session=tmp_path / "session",
     )
-    from offline_rift.ui.service import LiveDashboard
+    from offline_rift.ui.service import LiveHudService
 
-    assert LiveDashboard(client).state()["recommendation"]["role"] == "BOTTOM"
+    assert LiveHudService(client).state()["recommendation"]["role"] == "BOTTOM"
     saved = read_json(tmp_path / "session/samples/000001.json")
     assert saved["active_current_gold"] == 1200
     assert saved["active_slot"] == 0
