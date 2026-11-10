@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from offline_rift.inference.advice import AdviceController
 from offline_rift.inference.coach import MacroCoach
-from offline_rift.training.coach import select_candidate, train_coach
+from offline_rift.training.coach import reselect_coach, select_candidate, train_coach
 from rift_common.artifacts import atomic_json, file_digest, read_json
 from rift_common.behavior import team_activity
 from rift_common.coaching import POLICY_SCOPES, alignment, withhold_conflicting_role
@@ -97,7 +97,7 @@ def test_conflicting_role_is_withheld_without_inventing_an_alternative():
 
 
 def test_six_real_models_are_scope_trained_reload_route_and_detect_corruption(
-    tmp_path, match_payloads, catalog
+    tmp_path, match_payloads, catalog, monkeypatch
 ):
     builder = DatasetBuilder()
     for i in range(4):
@@ -107,7 +107,12 @@ def test_six_real_models_are_scope_trained_reload_route_and_detect_corruption(
     protocol = tmp_path / "protocol.json"
     atomic_json(protocol, {"holdout_matches": ["KR_3"], "steps": 1})
     result = train_coach(
-        path, tmp_path / "coach", steps=1, holdout_matches=("KR_3",), protocol_path=protocol
+        path,
+        tmp_path / "coach",
+        steps=1,
+        holdout_matches=("KR_3",),
+        protocol_path=protocol,
+        study_design="relative-context-v2",
     )
     assert result["status"] == "complete" and set(result["selected"]) == set(POLICY_SCOPES)
     assert (
@@ -140,6 +145,54 @@ def test_six_real_models_are_scope_trained_reload_route_and_detect_corruption(
         returns[arrays["terminals"]], arrays["rewards"][arrays["terminals"]]
     )
     assert predictions.shape == arrays["actions"].shape
+    from copy import deepcopy
+
+    from rift_research.game_review import replay_game, review_metrics
+
+    match, timeline = macro_match(match_payloads, "EUW1_reserved")
+    payload = {"match": match, "timeline": timeline}
+    decisions = replay_game(payload, coach)
+    assert {r["scope"] for r in decisions} == set(POLICY_SCOPES)
+    assert len({(r["team"], r["actor"]) for r in decisions}) == 12
+    assert len(review_metrics(decisions)) == 6
+    from rift_common.items import ItemCatalog
+
+    altered_items = deepcopy(catalog.data)
+    altered_items["1001"]["gold"]["total"] += 10000
+    exact_catalog = ItemCatalog(altered_items)
+    top = coach.policies["TOP"]
+    original_predict = top.predict_batch
+    encoded = []
+
+    def capture(observed, groups, masks):
+        encoded.append(observed.copy())
+        return original_predict(observed, groups, masks)
+
+    observations = read_match(match, timeline)
+    with monkeypatch.context() as patch:
+        patch.setattr(top, "predict_batch", capture)
+        coach.recommend(
+            observations[3], 100, "1", role="TOP", previous=observations[2], catalog=exact_catalog
+        )
+    index = top.encoder.names.index("self_items")
+    expected = exact_catalog.power(list(observations[3].player("1").items), 2500)[0] / 20000
+    assert encoded[-1][0, index] == pytest.approx(expected)
+    assert top.encoder.catalog.data == catalog.data  # Frozen default is not mutated.
+    changed = deepcopy(payload)
+    changed["timeline"]["info"]["frames"][5]["participantFrames"]["1"]["level"] = 18
+    later = replay_game(changed, coach)
+    assert [r for r in decisions if r["time"] < 300] == [r for r in later if r["time"] < 300]
+    # A training match may never be presented as an unseen one-game review.
+    match["metadata"]["matchId"] = "KR_0"
+    with pytest.raises(ValueError, match="excluded"):
+        replay_game(payload, coach)
+    with pytest.raises(ValueError, match="No development"):
+        reselect_coach(tmp_path / "coach", tmp_path / "missing-region", protocol_path=protocol)
+    assert read_json(tmp_path / "missing-region/study.json")["status"] == "failed"
+    assert (
+        MacroCoach(result["bundle"]).metadata["development_gate_passed"]
+        == result["development_gate_passed"]
+    )
     terminal = np.flatnonzero(arrays["terminals"])[0]
     assert returns[terminal - 1] == pytest.approx(0.9 * returns[terminal])
     manifest = read_json(tmp_path / "coach/model/coach.json")

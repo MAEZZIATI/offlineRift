@@ -116,5 +116,11 @@ Optional Chromium checks use synthetic localhost fixtures via RIFT_TEST_BROWSER.
 Tests never call Riot or Data Dragon. Research is excluded from the production wheel.
 The [research guide](research/README.md) covers optional diagnostics and reporting.
 The new synthesis is [research/docs/SYNTHESIS.pdf](research/docs/SYNTHESIS.pdf).
+The subsequent [European study](research/docs/EUROPEAN_STUDY.md) and
+[executed game notebook](research/notebooks/european_high_elo_game.ipynb) include all
+six policies, both teams, all ten players, plots and the first study's TEAM regression.
+The revised regional selection is an experimental candidate: a fresh forty-game
+comparison supports better MIDDLE/UTILITY activity agreement, with other changes
+uncertain. Its activation retains the previous coach. Win-rate gains remain unproven.
 Superseded prototypes and dated documents are checksummed in the local archive;
 [history](research/docs/HISTORY.md) explains where they were preserved.

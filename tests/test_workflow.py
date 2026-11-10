@@ -44,6 +44,25 @@ def test_immutable_build_cache_reuse_and_changed_input(tmp_path, match_payloads,
     assert workflow.state()["dataset"]["path"] == second["path"]
 
 
+def test_ranked_roster_registers_verified_unique_players_and_preserves_primary(
+    tmp_path, match_payloads
+):
+    workflow = prepare(tmp_path, match_payloads)
+    api = SimpleNamespace(
+        fetch_ranked_accounts=Mock(
+            return_value=[
+                {"puuid": "verified-eu-2", "leaguePoints": 100},
+                {"puuid": "verified-eu-1", "leaguePoints": 200},
+            ]
+        )
+    )
+    added = workflow.add_ranked_players("euw1", "CHALLENGER", limit=1, api=api)
+    assert [p["puuid"] for p in added] == ["verified-eu-1"]
+    assert added[0]["region"] == "europe" and Path(added[0]["roster_snapshot"]).exists()
+    assert workflow.config["primary_puuid"] == "player-1"
+    assert workflow.add_ranked_players("euw1", "CHALLENGER", limit=1, api=api) == []
+
+
 def test_failed_training_does_not_publish_latest_model(
     tmp_path, match_payloads, catalog, monkeypatch
 ):

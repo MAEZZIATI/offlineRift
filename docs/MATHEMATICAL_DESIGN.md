@@ -54,6 +54,41 @@ method below is a project-specific experiment, not an implementation of RORL.
 
 ## Availability-aware consistency
 
+### European representation and checkpoint experiment
+
+`decision-state-v2` preserves all 64 v1 features and adds 24 masked static features:
+four team-mean differences, three focal-minus-ally and three focal-minus-enemy
+differences, and two measured alive fractions. Linear differences use the operands'
+existing scales and require both known flags. Alive fractions require all five
+current dead flags. No new event-history derivative can preserve omitted information.
+
+The optional phase screen intersects serving support with `N_train(scope, phase, a)
+>= 20`, using identified training rows and three fixed time bins (<14, 14–25, >=25
+minutes). It does not alter the stored feasibility masks or Bellman target support.
+It is a coarse empirical screen; conditional exchangeability and state-local overlap
+remain unestablished. Report the resulting coverage and action loss.
+
+The softer imitation candidate replaces inverse-square-root class weights with
+inverse-quarter-power weights, retaining normalization over supported classes.
+IQL uses its own advantage-weighted categorical actor loss. Sparse identified terminal
+rows, especially TEAM, remain a limitation of its TD supervision.
+
+Every 500 updates (up to 4,000), evaluate the frozen clean/cold development criterion
+below on the fitted scope. Restore the best network parameters and stop after three
+nonimproving checkpoints. Record both completed updates and the restored checkpoint.
+Optimizer state is not resumed after restoration. Candidate and checkpoint selection
+never consult reserved games. These changes form a product experiment, not an isolated
+feature/dropout ablation or evidence of increased win rate.
+
+The subsequent adaptive regional selection reuses these saved checkpoints. Its score
+is the equal-weight mean of the European and Korean development scores defined below,
+with both regional gates and at least twenty identified targets per region. It changes
+candidate selection only, not checkpoint fitting or optimizer weights. A revision
+motivated by a held-out result needs fresh evaluation; the consulted cohort cannot
+independently establish its quality. The failed first-study TEAM comparison is retained.
+
+### Shared omission regularizer
+
 Let C(x) zero the history-dependent values AND their known/enabled flags. It removes
 information without filling it with predictions. Recompute feasibility F(C(x)). Training
 also samples joint omission with probability 0.5. Supervised omission is rejected if the

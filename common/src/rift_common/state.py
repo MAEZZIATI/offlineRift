@@ -7,7 +7,23 @@ import numpy as np
 from rift_common.actions import ROLES
 from rift_common.items import ItemCatalog
 
-STATE_SCHEMA = "decision-state-v1"
+STATE_SCHEMA = "decision-state-v2"
+STATE_SCHEMAS = ("decision-state-v1", STATE_SCHEMA)
+
+RELATIVE_FEATURES = (
+    "team_level_advantage",
+    "team_items_advantage",
+    "team_cs_advantage",
+    "team_kills_advantage",
+    "self_ally_level_difference",
+    "self_ally_items_difference",
+    "self_ally_cs_difference",
+    "self_enemy_level_difference",
+    "self_enemy_items_difference",
+    "self_enemy_cs_difference",
+    "ally_alive",
+    "enemy_alive",
+)
 
 
 @dataclass(frozen=True)
@@ -53,8 +69,11 @@ def _mean(values):
 class StateEncoder:
     """No x/y, final match statistics or hidden team gold enter the policy state."""
 
-    def __init__(self, catalog: ItemCatalog):
+    def __init__(self, catalog: ItemCatalog, *, schema=STATE_SCHEMA):
+        if schema not in STATE_SCHEMAS:
+            raise ValueError("Unsupported decision state schema")
         self.catalog = catalog
+        self.schema = schema
 
     @property
     def names(self):
@@ -90,6 +109,8 @@ class StateEncoder:
             names += [name, name + "_known"]
         for kind in ("dragon", "baron", "herald"):
             names += [kind + "_eta", kind + "_available", kind + "_enabled"]
+        if self.schema == "decision-state-v2":
+            names += [name + suffix for name in RELATIVE_FEATURES for suffix in ("", "_known")]
         return names
 
     def encode(self, current: Observation, team: int, player_id=None, *, role=None, previous=None):
@@ -197,6 +218,27 @@ class StateEncoder:
                 float(bool(obj.get("available")) and known),
                 float(known),
             ]
+        if self.schema == "decision-state-v2":
+            # Derive differences only when both measured operands are known. These
+            # use static public stats; omitted event history cannot leak through them.
+            encoded = dict(zip(self.names, values))
+
+            def difference(left, right):
+                known = encoded[left + "_known"] and encoded[right + "_known"]
+                values.extend([encoded[left] - encoded[right] if known else 0, float(known)])
+
+            for field in ("level", "items", "cs", "kills"):
+                difference("ally_" + field, "enemy_" + field)
+            for side in ("ally", "enemy"):
+                for field in ("level", "items", "cs"):
+                    difference("self_" + field, side + "_" + field)
+            for players in groups:
+                add(
+                    sum(not p.is_dead for p in players)
+                    if all(p.is_dead is not None for p in players)
+                    else None,
+                    5,
+                )
         result = np.asarray(values, dtype=np.float32)
         if result.shape != (len(self.names),) or not np.isfinite(result).all() or current.time < 0:
             raise ValueError("Invalid decision state")

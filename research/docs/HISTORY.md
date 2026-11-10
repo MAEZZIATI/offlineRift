@@ -13,6 +13,12 @@ Existing experiment/source snapshots remain under their original data directorie
 Before the next robustness study, the completed six-policy synthesis was copied into
 `data/archive/coherent-robust-20261109/`, with its own SHA-256 `manifest.json`.
 
+Before the European experiment, the previous packaged research defaults were copied
+to `data/archive/european-improvement-20261110/`. Its checksum manifest has SHA-256
+`8dbe4486cb8baca9ff5770e99a1db625305f55a5e594d1090d2375e6138e166f`.
+It also retains both executed first-cohort notebook versions before the final fresh-game report.
+Previous models, datasets and interrupted builds remain in their original locations.
+
 The maintained product now consists of one macro coach and five role specialists.
 Historical ADC results do not imply that the product is ADC-only, and historical
 training successes do not establish strategic usefulness. Current documentation and

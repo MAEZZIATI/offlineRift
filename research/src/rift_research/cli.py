@@ -10,6 +10,29 @@ from rift_research.evaluation import describe_dataset, evaluate_policy
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
+    comparison = sub.add_parser(
+        "compare-holdout", help="Paired match-bootstrap comparison of fixed products"
+    )
+    comparison.add_argument("--previous", type=Path, required=True)
+    comparison.add_argument("--candidate", type=Path, required=True)
+    comparison.add_argument("--output", type=Path, required=True)
+    comparison.add_argument("--bootstrap-samples", type=int, default=1000)
+    game = sub.add_parser(
+        "review-game", help="Replay all policies/players in one reserved European ranked game"
+    )
+    game.add_argument("--match", type=Path, required=True)
+    game.add_argument("--bundle", type=Path, required=True)
+    game.add_argument("--baseline", type=Path)
+    game.add_argument("--study", type=Path)
+    game.add_argument("--protocol", type=Path)
+    game.add_argument("--catalogs", type=Path, default=Path("data/catalogs"))
+    game.add_argument("--holdout-comparison", type=Path)
+    game.add_argument(
+        "--followup", type=Path, help="Retained first-test findings and adaptive development status"
+    )
+    game.add_argument("--output", type=Path, required=True)
+    game.add_argument("--notebook", type=Path)
+    game.add_argument("--execute-notebook", action="store_true")
     describe = sub.add_parser(
         "dataset", help="Audit actor/role option coverage and measured durations"
     )
@@ -21,6 +44,11 @@ def main():
     evaluate.add_argument("--bundle", type=Path, required=True)
     evaluate.add_argument("--output", type=Path, required=True)
     evaluate.add_argument("--bootstrap-samples", type=int, default=500)
+    evaluate.add_argument(
+        "--project-state",
+        action="store_true",
+        help="Explicit v2-to-v1 feature projection for an older baseline on new matches",
+    )
     evaluate.add_argument(
         "--match-manifest",
         type=Path,
@@ -108,6 +136,66 @@ def main():
     synthesis.add_argument("--baseline-evaluation", type=Path)
     synthesis.add_argument("--output", type=Path, default=Path("research/docs/SYNTHESIS.pdf"))
     args = parser.parse_args()
+    if args.command == "compare-holdout":
+        from rift_research.evaluation import compare_holdout
+
+        report = compare_holdout(
+            args.previous, args.candidate, args.output, samples=args.bootstrap_samples
+        )
+        print(
+            json.dumps(
+                {
+                    "matches": len(report["matches"]),
+                    "paired_differences": report["paired_differences"],
+                }
+            )
+        )
+        return
+    if args.command == "review-game":
+        from rift_research.game_review import review_game, write_notebook
+
+        report = review_game(
+            args.match,
+            args.bundle,
+            args.output,
+            baseline=args.baseline,
+            study=args.study,
+            protocol=args.protocol,
+            holdout_comparison=args.holdout_comparison,
+            followup=args.followup,
+            catalogs=args.catalogs,
+        )
+        if args.notebook:
+            write_notebook(args.output, args.notebook)
+            if args.execute_notebook:
+                import sys
+
+                import nbformat
+                from nbclient import NotebookClient
+
+                notebook = nbformat.read(args.notebook, as_version=4)
+                client = NotebookClient(
+                    notebook,
+                    timeout=600,
+                    kernel_name="python3",
+                    resources={"metadata": {"path": str(Path.cwd())}},
+                )
+                # Run with the same environment as the installed research command.
+                client.create_kernel_manager().kernel_spec.argv[0] = sys.executable
+                client.execute()
+                nbformat.write(notebook, args.notebook)
+        elif args.execute_notebook:
+            raise ValueError("--execute-notebook requires --notebook")
+        print(
+            json.dumps(
+                {
+                    "match_id": report["match_id"],
+                    "models": list(report["models"]),
+                    "notebook": str(args.notebook) if args.notebook else None,
+                }
+            )
+        )
+        return
     if args.command == "synthesize":
         from rift_research.reporting import synthesize
 
@@ -203,6 +291,7 @@ def main():
             samples=args.bootstrap_samples,
             new_matches=args.new_matches,
             stress=args.stress,
+            project_state=args.project_state,
             match_ids=json.loads(args.match_manifest.read_text())["holdout_matches"]
             if args.match_manifest
             else None,

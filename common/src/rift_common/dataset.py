@@ -9,7 +9,7 @@ import numpy as np
 
 from rift_common.actions import ACTION_NAMES, ACTION_SCHEMA, ROLES, feasible_actions, group_index
 from rift_common.behavior import player_activity, team_activity
-from rift_common.state import STATE_SCHEMA, StateEncoder
+from rift_common.state import STATE_SCHEMA, STATE_SCHEMAS, StateEncoder
 from rift_common.timeline import read_match
 
 DATASET_SCHEMA = "option-transitions-v3"
@@ -154,11 +154,13 @@ def load_dataset(path):
         arrays = {key: archive[key] for key in archive.files if key != "metadata"}
     from rift_common.items import ItemCatalog
 
-    names = StateEncoder(ItemCatalog(metadata["item_catalog"])).names
+    names = StateEncoder(
+        ItemCatalog(metadata["item_catalog"]), schema=metadata["state_schema"]
+    ).names
     if (
         metadata.get("dataset_schema")
         not in {DATASET_SCHEMA, "option-transitions-v2", "option-transitions-v1"}
-        or metadata.get("state_schema") != STATE_SCHEMA
+        or metadata.get("state_schema") not in STATE_SCHEMAS
         or metadata.get("action_schema") != ACTION_SCHEMA
         or metadata["feature_names"] != names
         or {int(k): v for k, v in metadata["action_names"].items()} != ACTION_NAMES

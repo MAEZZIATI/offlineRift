@@ -323,7 +323,7 @@ class Workflow:
         config = TrainConfig(**settings)
         latest = self.state()
         old = latest.get("model", {})
-        from rift_common import network, observation_masks
+        from rift_common import network, observation_masks, support
 
         from offline_rift.training import augmentation, consistency, iql, targets, trainer
 
@@ -332,7 +332,15 @@ class Workflow:
                 {"dataset": data["fingerprint"], "settings": settings}, sort_keys=True
             ).encode()
         )
-        for module in (network, trainer, targets, augmentation, consistency, observation_masks):
+        for module in (
+            network,
+            trainer,
+            targets,
+            augmentation,
+            consistency,
+            observation_masks,
+            support,
+        ):
             signature.update(Path(module.__file__).read_bytes())
         if config.algorithm == "iql":
             signature.update(Path(iql.__file__).read_bytes())
@@ -381,6 +389,49 @@ class Workflow:
         atomic_json(self.config_path, self.config)
         return player
 
+    def add_ranked_players(self, platform, tier, *, limit=5, api=None):
+        """Register API-verified roster identities without changing the primary account."""
+        import os
+
+        from offline_rift.collection import REGIONS
+
+        if platform not in REGIONS or not 1 <= limit <= 30:
+            raise ValueError("Known platform and roster limit in [1,30] required")
+        own = api is None
+        api = api or RiotClient(os.environ.get("RIOT_API_KEY", ""), REGIONS[platform])
+        try:
+            entries = api.fetch_ranked_accounts(platform, tier)
+        finally:
+            if own:
+                api.close()
+        entries = sorted(entries, key=lambda e: (-e.get("leaguePoints", 0), e["puuid"]))[:limit]
+        snapshot = {
+            "platform": platform,
+            "tier": tier,
+            "entries": entries,
+            "meaning": "Current roster membership, not historical match rank",
+        }
+        snapshot_path = self.path("artifacts") / "rosters" / (run_id() + ".json")
+        atomic_json(snapshot_path, snapshot)
+        existing = {p["puuid"] for p in self.config["players"]}
+        added = []
+        for entry in entries:
+            if entry["puuid"] in existing:
+                continue
+            player = {
+                "puuid": entry["puuid"],
+                "region": REGIONS[platform],
+                "platform": platform,
+                "verified_tier": tier,
+                "roster_snapshot": str(snapshot_path.resolve()),
+                "riot_id": "",
+            }
+            added.append(player)
+            existing.add(player["puuid"])
+        self.config["players"].extend(added)
+        atomic_json(self.config_path, self.config)
+        return added
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -410,6 +461,12 @@ def main():
     add = sub.add_parser("add-player")
     add.add_argument("--riot-id", required=True)
     add.add_argument("--region", required=True)
+    ranked = sub.add_parser("add-ranked-players", help="Register verified top-tier roster PUUIDs")
+    ranked.add_argument("--platform", required=True)
+    ranked.add_argument(
+        "--tier", choices=("MASTER", "GRANDMASTER", "CHALLENGER"), default="CHALLENGER"
+    )
+    ranked.add_argument("--limit", type=int, default=5)
     sub.add_parser("build", help="Build explicit actor/role next-action transitions from cache")
     coach = sub.add_parser(
         "train-coach", help="Train and compare the macro coach and all five role specialists"
@@ -417,6 +474,18 @@ def main():
     coach.add_argument("--steps", type=int, default=10000)
     coach.add_argument("--output", type=Path, required=True)
     coach.add_argument("--holdout-manifest", type=Path, required=True)
+    coach.add_argument(
+        "--study-design",
+        choices=("coherent-robust-v1", "relative-context-v2"),
+        default="coherent-robust-v1",
+    )
+    reselect = sub.add_parser(
+        "reselect-coach",
+        help="Reuse fitted candidates under a region-balanced development rule; needs a fresh test",
+    )
+    reselect.add_argument("--study", type=Path, required=True)
+    reselect.add_argument("--output", type=Path, required=True)
+    reselect.add_argument("--holdout-manifest", type=Path, required=True)
     for command in ("train", "run"):
         child = sub.add_parser(command, help="Build and train an experimental next-action policy")
         child.add_argument("--algorithm", choices=("cql", "bc", "iql"))
@@ -519,6 +588,15 @@ def main():
             )
         elif args.command == "add-player":
             print(json.dumps(workflow.add_player(args.riot_id, args.region)))
+        elif args.command == "add-ranked-players":
+            print(
+                json.dumps(workflow.add_ranked_players(args.platform, args.tier, limit=args.limit))
+            )
+        elif args.command == "reselect-coach":
+            from offline_rift.training.coach import reselect_coach
+
+            result = reselect_coach(args.study, args.output, protocol_path=args.holdout_manifest)
+            print(json.dumps({"status": result["status"], "bundle": result["bundle"]}))
         elif args.command == "train-coach":
             from offline_rift.training.coach import train_coach
 
@@ -530,6 +608,7 @@ def main():
                 steps=args.steps,
                 holdout_matches=reserved,
                 protocol_path=args.holdout_manifest,
+                study_design=args.study_design,
             )
             print(json.dumps({"status": result["status"], "bundle": result["bundle"]}))
         elif args.command in {"build", "train", "run"}:

@@ -8,12 +8,22 @@ Successful training or behavior agreement does not establish useful or optimal s
 
 ## Observations and actions
 
-`decision-state-v1` contains 64 causal public-observation values: time, perspective,
+`decision-state-v2` contains 88 causal public-observation values. Its first 64 retain
+the exact v1 ordering/scaling: time, perspective,
 role masks, public stats/equipment, available health/dead state, recent measured rates,
 public event history and pinned objective estimates. Every optional value has a mask.
 Final economic statistics and future observations are never input features. Historical
 roles are retrospective. Positions, waves, vision, cast history and camp safety are not
 invented for serving. Live testing is deferred; the same contract will be checked later.
+
+V2 adds twelve value/known pairs: team level/item/CS/kill differences, focal-player
+level/item/CS differences from each team's mean, and measured alive fractions for both
+teams. Differences require both operands; alive fractions require all five dead flags.
+These features contain no future outcomes, positions or additional historical role
+assignments. V1 datasets and bundles remain readable under their original schema.
+Historical replay supplies the game's exact cached patch catalog explicitly to both
+policies, without mutating their frozen default encoder/catalog. Replay persists that
+catalog and its digest; the final notebook also verifies raw/batch prediction parity.
 
 `next-action-v1` contains fifteen coarse activities with feasibility masks and human
 checks. See ACTIONS.md. Team views cannot select individual farming or respawn options.
@@ -59,10 +69,18 @@ is followed by unresolved activity. It does not create intermediate commands, jo
 episodes or treat the observed trajectory return as a causal alternative-action value.
 Call it conservative observed-return regression, not a replication of standard CQL.
 
-The current comparison uses observed-return regression and imitation, each with and
+The preceding robustness comparison used observed-return regression and imitation, each with and
 without stronger joint omission and availability-aware consistency. Every algorithm is
 eligible. The earlier Bellman comparison remains historical; discrete IQL remains optional.
 See MATHEMATICAL_DESIGN.md for equations and frozen exploratory development gates.
+
+The European `relative-context-v2` study additionally compares phase-supported imitation,
+softer class weights, another consistency seed and discrete IQL. All candidates use
+development checkpoint selection; no reserved game selects weights or thresholds.
+Phase support counts identified training examples only, within [0,14), [14,25) and
+[25,infinity) game minutes. The optional serving restriction requires twenty examples
+of an action in the current role/phase. This coarse overlap screen is not calibrated
+confidence, local state support or a safety guarantee. It does not change critic targets.
 
 ## Composition and evaluation
 
