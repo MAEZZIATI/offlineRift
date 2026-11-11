@@ -19,10 +19,14 @@ from offline_rift.inference.policy import NextActionPolicy
 from offline_rift.training.trainer import PolicyTrainer, TrainConfig
 
 
-def scope_diagnostics(policy, arrays, scope):
+def scope_diagnostics(policy, arrays, scope, *, region_prefix=None):
     selected = (arrays["groups"] == GROUPS.index(scope)) & np.isin(
         arrays["match_ids"], policy.metadata["training_report"]["validation_matches"]
     )
+    if region_prefix is not None:
+        selected &= np.char.startswith(arrays["match_ids"], region_prefix)
+    if not selected.any():
+        raise ValueError("No development observations in requested scope/region")
     predictions, _ = policy.predict_batch(
         arrays["observations"][selected],
         arrays["groups"][selected],
@@ -90,9 +94,20 @@ def select_candidate(candidates):
     )
 
 
-def train_coach(dataset, output, *, steps=10000, holdout_matches=(), seed=42, protocol_path=None):
+def train_coach(
+    dataset,
+    output,
+    *,
+    steps=10000,
+    holdout_matches=(),
+    seed=42,
+    protocol_path=None,
+    study_design="coherent-robust-v1",
+):
     """Retain all comparisons; choose on development only, never publish a latest pointer."""
     output = Path(output)
+    if study_design not in {"coherent-robust-v1", "relative-context-v2"}:
+        raise ValueError("Unknown coach study design")
     output.mkdir(parents=True, exist_ok=False)
     arrays, metadata = load_dataset(dataset)
     if metadata.get("target_schema") != "executed-evidence-v3":
@@ -105,7 +120,7 @@ def train_coach(dataset, output, *, steps=10000, holdout_matches=(), seed=42, pr
         "selected": {},
         "policy_winrate": None,
         "selection": "All algorithms eligible; development gate, then mean clean/cold identified F1 minus 0.1 times still-feasible choice disagreement",
-        "study_design": "coherent-robust-v1",
+        "study_design": study_design,
         "coverage": {},
         "source_sha256": {},
     }
@@ -155,6 +170,37 @@ def train_coach(dataset, output, *, steps=10000, holdout_matches=(), seed=42, pr
                     "history_consistency_weight": 0.25,
                 },
             }
+            if study_design == "relative-context-v2":
+                settings = replace(
+                    settings, evaluation_interval=min(500, steps), early_stopping_patience=3
+                )
+                candidates.update(
+                    {
+                        "bc-phase": {
+                            "algorithm": "bc",
+                            "bounded_values": False,
+                            "minimum_phase_support": 20,
+                        },
+                        "bc-phase-softweights": {
+                            "algorithm": "bc",
+                            "bounded_values": False,
+                            "minimum_phase_support": 20,
+                            "class_weight_exponent": 0.25,
+                        },
+                        "bc-consistent-seed43": {
+                            "algorithm": "bc",
+                            "bounded_values": False,
+                            "joint_history_dropout": 0.5,
+                            "history_consistency_weight": 0.25,
+                            "seed": 43,
+                        },
+                        "iql-phase": {
+                            "algorithm": "iql",
+                            "bounded_values": False,
+                            "minimum_phase_support": 20,
+                        },
+                    }
+                )
             report["candidates"][scope] = []
             for name, overrides in candidates.items():
                 print(f"Training {scope}/{name}: {steps} updates", flush=True)
@@ -292,3 +338,89 @@ def assemble_coach(dataset, selections, directory, *, arrays=None):
     manifest["run_sha256"] = file_digest(directory / "run.json")
     atomic_json(directory / "coach.json", manifest)
     return directory
+
+
+def reselect_coach(study, output, *, protocol_path):
+    """Reuse fitted candidates with an explicit region-balanced development rule.
+
+    This is an adaptive development experiment. It needs a new unseen evaluation;
+    previously consulted holdouts cannot establish the revised selection's quality.
+    No optimizer is rerun and every policy retains the original shared match split.
+    """
+    study, output = Path(study), Path(output)
+    source = read_json(study / "study.json")
+    if source["status"] != "complete":
+        raise ValueError("Reselection requires a completed source study")
+    if file_digest(source["dataset_path"]) != source["dataset_sha256"]:
+        raise ValueError("Source study dataset integrity mismatch")
+    arrays, _ = load_dataset(source["dataset_path"])
+    protocol = read_json(Path(protocol_path))
+    reserved = set(protocol["holdout_matches"])
+    report = deepcopy(source)
+    report.update(
+        status="running",
+        selected={},
+        candidates={},
+        study_design="european-balanced-selection-v1",
+        source_study=str(study.resolve()),
+        source_study_sha256=file_digest(study / "study.json"),
+        selection="Equal-weight Europe/Korea mean clean/cold identified F1 minus 0.1 switching; each region must pass development gates",
+        evaluation_status="requires fresh evaluation after adaptive development",
+        optimizer_updates_this_stage=0,
+    )
+    output.mkdir(parents=True, exist_ok=False)
+    copytree(study / "sources", output / "sources")
+    copy2(protocol_path, output / "protocol.json")
+    report["protocol_sha256"] = file_digest(output / "protocol.json")
+    copy2(__file__, output / "selection-source.py")
+    report["selection_source_sha256"] = file_digest(output / "selection-source.py")
+    atomic_json(output / "study.json", report)
+    try:
+        for scope, candidates in source["candidates"].items():
+            report["candidates"][scope] = []
+            for original in candidates:
+                policy = NextActionPolicy(original["bundle"])
+                split = policy.metadata["training_report"]
+                if reserved & (set(split["training_matches"]) | set(split["validation_matches"])):
+                    raise ValueError(
+                        "Reserved evaluation match appeared in fitted/development data"
+                    )
+                regions = {
+                    region: scope_diagnostics(policy, arrays, scope, region_prefix=prefix)
+                    for region, prefix in (("Europe", "EU"), ("Korea", "KR"))
+                }
+                candidate = {
+                    **original,
+                    "global_selection_score": original["selection_score"],
+                    "development_regions": regions,
+                    "selection_score": float(
+                        np.mean([r["selection_score"] for r in regions.values()])
+                    ),
+                    "development_gate_passed": original["development_gate_passed"]
+                    and all(
+                        r["development_gate_passed"] and r["identified_validation_rows"] >= 20
+                        for r in regions.values()
+                    ),
+                }
+                report["candidates"][scope].append(candidate)
+            report["selected"][scope] = select_candidate(report["candidates"][scope])
+            atomic_json(output / "study.json", report)
+        directory = assemble_coach(
+            source["dataset_path"], report["selected"], output / "model", arrays=arrays
+        )
+        report.update(
+            status="complete",
+            bundle=str(directory.resolve()),
+            development_gate_passed=all(
+                r["development_gate_passed"] for r in report["selected"].values()
+            ),
+        )
+        return report
+    except BaseException as error:
+        report.update(
+            status="interrupted" if isinstance(error, KeyboardInterrupt) else "failed",
+            error=str(error),
+        )
+        raise
+    finally:
+        atomic_json(output / "study.json", report)

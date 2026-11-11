@@ -41,10 +41,6 @@ class LiveStateAdapter:
             or timestamp < 0
         ):
             raise ValueError("An active 5v5 Summoner’s Rift observation is required")
-        if game.get("gameMode") not in (None, "CLASSIC"):
-            raise ValueError(
-                "Policy advice is unavailable for this game mode; training covers ranked Classic only"
-            )
         identities = {}
         prepared = []
         for p in raw:

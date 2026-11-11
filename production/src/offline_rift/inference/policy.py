@@ -17,7 +17,8 @@ from rift_common.actions import (
 from rift_common.artifacts import read_json, verify_bundle_manifest
 from rift_common.items import ItemCatalog
 from rift_common.network import OptionNetwork, rank_options
-from rift_common.state import STATE_SCHEMA, StateEncoder
+from rift_common.state import STATE_SCHEMAS, StateEncoder
+from rift_common.support import phase_support
 
 
 class NextActionPolicy:
@@ -27,14 +28,16 @@ class NextActionPolicy:
         if (
             self.metadata.get("bundle_schema") != "next-action-policy-v1"
             or self.metadata.get("action_schema") != ACTION_SCHEMA
-            or self.metadata.get("state_schema") != STATE_SCHEMA
+            or self.metadata.get("state_schema") not in STATE_SCHEMAS
         ):
             raise ValueError(
                 "Legacy formation model rejected; train a next-action model with rift train"
             )
         verify_bundle_manifest(directory)
         self.name = directory.name
-        self.encoder = StateEncoder(ItemCatalog(self.metadata["item_catalog"]))
+        self.encoder = StateEncoder(
+            ItemCatalog(self.metadata["item_catalog"]), schema=self.metadata["state_schema"]
+        )
         if (
             self.encoder.names != self.metadata["feature_names"]
             or {int(k): v for k, v in self.metadata["action_names"].items()} != ACTION_NAMES
@@ -78,6 +81,17 @@ class NextActionPolicy:
             or not 0 <= self.config["behavior_floor"] < 1
         ):
             raise ValueError("Invalid model support contract")
+        minimum_phase = self.config.get("minimum_phase_support", 0)
+        if type(minimum_phase) is not int or minimum_phase < 0:
+            raise ValueError("Invalid phase support minimum")
+        if minimum_phase:
+            phase_support(
+                np.empty((0, len(self.encoder.names))),
+                np.empty(0, dtype=int),
+                self.encoder.names,
+                self.metadata["training_report"].get("counts_by_phase"),
+                minimum_phase,
+            )
 
     def predict_batch(self, observations, groups, masks):
         observed = np.asarray(observations, dtype=np.float32)
@@ -113,6 +127,15 @@ class NextActionPolicy:
                     minimum_support=self.config["minimum_support"],
                     behavior_floor=self.config["behavior_floor"],
                     minimum_score_gap=self.config.get("minimum_score_gap", 0),
+                    contextual_support=phase_support(
+                        observed[start : start + 1024],
+                        groups[start : start + 1024],
+                        self.encoder.names,
+                        self.metadata["training_report"]["counts_by_phase"],
+                        self.config["minimum_phase_support"],
+                    )
+                    if self.config.get("minimum_phase_support", 0)
+                    else None,
                 )
                 outside_scope = ~np.isin(
                     groups[start : start + 1024],
@@ -124,7 +147,7 @@ class NextActionPolicy:
                 scores.append(s)
         return np.concatenate(predicted), np.concatenate(scores)
 
-    def recommend(self, current, team, actor=None, *, role=None, previous=None):
+    def recommend(self, current, team, actor=None, *, role=None, previous=None, catalog=None):
         player = current.player(actor) if actor is not None else None
         if player and player.team != team:
             raise ValueError("Player does not belong to selected team")
@@ -156,8 +179,13 @@ class NextActionPolicy:
                 "message": "This experimental candidate is enabled only for: "
                 + ", ".join(self.advisory_groups),
             }
-        state = self.encoder.encode(current, team, actor, role=role, previous=previous)
-        masks = feasible_actions(state, self.encoder.names)
+        encoder = (
+            self.encoder
+            if catalog is None
+            else StateEncoder(catalog, schema=self.metadata["state_schema"])
+        )
+        state = encoder.encode(current, team, actor, role=role, previous=previous)
+        masks = feasible_actions(state, encoder.names)
         group = group_index(actor is None, role)
         predicted, scores = self.predict_batch(state[None, :], np.asarray([group]), masks)
         if predicted[0] < 0:

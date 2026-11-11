@@ -51,6 +51,7 @@ def rank_options(
     minimum_support=20,
     behavior_floor=0.02,
     minimum_score_gap=0.0,
+    contextual_support=None,
 ):
     import numpy as np
 
@@ -79,6 +80,11 @@ def rank_options(
     ):
         raise ValueError("Invalid policy ranking contract")
     allowed = action_support(counts, groups, masks, minimum_support)
+    if contextual_support is not None:
+        contextual_support = np.asarray(contextual_support)
+        if contextual_support.shape != allowed.shape or contextual_support.dtype != bool:
+            raise ValueError("Invalid contextual support")
+        allowed &= contextual_support
     # A learned behavior-support constraint is distinct from a win probability.
     eligible_logits = np.where(masks, logits, -1e9)
     shifted = eligible_logits - np.max(eligible_logits, axis=1, keepdims=True)

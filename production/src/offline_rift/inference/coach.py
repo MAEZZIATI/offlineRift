@@ -99,8 +99,8 @@ class MacroCoach:
                 )
         return predicted, scores
 
-    def recommend(self, current, team, actor=None, *, role=None, previous=None):
-        macro = self.policies["TEAM"].recommend(current, team, previous=previous)
+    def recommend(self, current, team, actor=None, *, role=None, previous=None, catalog=None):
+        macro = self.policies["TEAM"].recommend(current, team, previous=previous, catalog=catalog)
         if actor is None:
             return {**macro, "policy_scope": "TEAM"}
         role = role or current.player(actor).role
@@ -113,7 +113,9 @@ class MacroCoach:
                 "role": role,
                 "game_time": current.time,
             }
-        result = self.policies[role].recommend(current, team, actor, role=role, previous=previous)
+        result = self.policies[role].recommend(
+            current, team, actor, role=role, previous=previous, catalog=catalog
+        )
         return withhold_conflicting_role(
             {
                 **result,

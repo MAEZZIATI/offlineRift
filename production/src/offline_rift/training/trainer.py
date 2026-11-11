@@ -9,11 +9,13 @@ import numpy as np
 import torch
 from rift_common import network as network_contract
 from rift_common import observation_masks
+from rift_common import support as support_contract
 from rift_common.actions import ACTION_NAMES, GROUPS
 from rift_common.artifacts import atomic_json, file_digest, write_bundle_manifest
 from rift_common.dataset import episode_returns, load_dataset
 from rift_common.metrics import behavior_metrics
 from rift_common.network import OptionNetwork, rank_options
+from rift_common.support import phase_counts, phase_support
 from torch.nn import functional as F
 
 from offline_rift.training import augmentation
@@ -50,9 +52,22 @@ class TrainConfig:
     training_groups: tuple[str, ...] = GROUPS
     critic_target: str = "td"
     history_consistency_weight: float = 0.0
+    minimum_phase_support: int = 0
+    evaluation_interval: int = 0
+    early_stopping_patience: int = 3
+    class_weight_exponent: float = 0.5
 
     def __post_init__(self):
-        for name in ("steps", "batch_size", "seed", "minimum_support", "cpu_threads"):
+        for name in (
+            "steps",
+            "batch_size",
+            "seed",
+            "minimum_support",
+            "cpu_threads",
+            "minimum_phase_support",
+            "evaluation_interval",
+            "early_stopping_patience",
+        ):
             if type(getattr(self, name)) is not int:
                 raise ValueError("Invalid training configuration: integer settings required")
         if self.split_seed is not None and type(self.split_seed) is not int:
@@ -70,6 +85,7 @@ class TrainConfig:
             "joint_history_dropout",
             "minimum_score_gap",
             "history_consistency_weight",
+            "class_weight_exponent",
         ):
             if not math.isfinite(getattr(self, name)):
                 raise ValueError("Invalid training configuration: finite settings required")
@@ -78,6 +94,10 @@ class TrainConfig:
             or self.target_mode not in {"identified", "representative"}
             or self.critic_target not in {"td", "episode_return"}
             or self.minimum_score_gap < 0
+            or self.minimum_phase_support < 0
+            or self.evaluation_interval < 0
+            or self.early_stopping_patience < 1
+            or not 0 <= self.class_weight_exponent <= 1
             or self.history_consistency_weight < 0
             or (self.history_consistency_weight > 0 and self.algorithm == "iql")
             or not self.advisory_groups
@@ -104,7 +124,9 @@ class TrainConfig:
             raise ValueError("Invalid training configuration")
 
 
-def predict(network, observations, groups, masks, counts, config):
+def predict(
+    network, observations, groups, masks, counts, config, *, names=None, context_counts=None
+):
     predictions = []
     values = []
     network.eval()
@@ -123,6 +145,15 @@ def predict(network, observations, groups, masks, counts, config):
                 minimum_support=config.minimum_support,
                 behavior_floor=config.behavior_floor,
                 minimum_score_gap=config.minimum_score_gap,
+                contextual_support=phase_support(
+                    observations[start : start + 1024],
+                    groups[start : start + 1024],
+                    names,
+                    context_counts,
+                    config.minimum_phase_support,
+                )
+                if config.minimum_phase_support
+                else None,
             )
             p[
                 ~np.isin(
@@ -135,9 +166,97 @@ def predict(network, observations, groups, masks, counts, config):
     return np.concatenate(predictions), np.concatenate(values)
 
 
+def checkpoint_diagnostics(network, arrays, metadata, selected, counts, config, context_counts):
+    """Select checkpoints on development only, under the coach's clean/cold rule."""
+    from rift_common.actions import Action, feasible_actions
+    from rift_common.observation_masks import COLD_START_FIELDS
+
+    observed = arrays["observations"][selected]
+    groups = arrays["groups"][selected]
+    truth = arrays["actions"][selected]
+    identified = arrays["action_identified"][selected]
+    arguments = {"names": metadata["feature_names"], "context_counts": context_counts}
+    clean, _ = predict(
+        network, observed, groups, arrays["action_masks"][selected], counts, config, **arguments
+    )
+    cold = observed.copy()
+    cold[:, [metadata["feature_names"].index(n) for n in COLD_START_FIELDS]] = 0
+    masks = feasible_actions(cold, metadata["feature_names"])
+    omitted, _ = predict(network, cold, groups, masks, counts, config, **arguments)
+    eligible = identified & masks[np.arange(len(truth)), truth]
+    still = (clean >= 0) & masks[np.arange(len(truth)), np.maximum(clean, 0)]
+    f1 = (
+        behavior_metrics(truth[identified], clean[identified], len(Action))["macro_f1"]
+        if identified.any()
+        else 0
+    )
+    cold_f1 = (
+        behavior_metrics(truth[eligible], omitted[eligible], len(Action))["macro_f1"]
+        if eligible.any()
+        else 0
+    )
+    switching = float(np.mean(clean[still] != omitted[still])) if still.any() else 1
+    voluntary = np.bincount(
+        clean[(clean >= 0) & (clean != Action.WAIT_RESPAWN)], minlength=len(Action)
+    )
+    concentration = float(voluntary.max() / max(1, voluntary.sum()))
+    retention = min(float(np.mean(clean >= 0)), float(np.mean(omitted >= 0)))
+    gate = bool(identified.any() and eligible.any() and retention >= 0.5 and concentration <= 0.9)
+    score = (f1 + cold_f1) / 2 - 0.1 * switching
+    diagnostic = {
+        "identified_f1": f1,
+        "cold_f1": cold_f1,
+        "switching": switching,
+        "concentration": concentration,
+        "retention": retention,
+        "gate": gate,
+        "score": score,
+    }
+    return (gate, score, -concentration), diagnostic
+
+
 class PolicyTrainer:
     def __init__(self, config: TrainConfig):
         self.config = config
+
+    def _explicit_update(
+        self, network, target, optimizer, batch, class_weights, support, consistency_loss, step
+    ):
+        config = self.config
+        q, logits = network(batch["observations"])
+        observed = q.gather(1, batch["actions"][:, None]).squeeze(1)
+        bc_loss = F.cross_entropy(
+            logits.masked_fill(~batch["action_masks"], -1e9),
+            batch["actions"],
+            weight=class_weights,
+        )
+        if config.algorithm == "cql":
+            targets = critic_targets(network, target, batch, support, config)
+            td_loss = F.smooth_l1_loss(observed, targets)
+            conservative = (
+                torch.logsumexp(q.masked_fill(~batch["action_masks"], -1e9), 1) - observed
+            ).mean()
+            loss = td_loss + config.alpha * conservative + 0.25 * bc_loss
+        else:
+            td_loss = conservative = torch.zeros((), device=config.device)
+            loss = bc_loss
+        loss = loss + config.history_consistency_weight * consistency_loss
+        if not torch.isfinite(loss):
+            raise RuntimeError("Non-finite optimizer loss")
+        optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(network.parameters(), 5, error_if_nonfinite=True)
+        optimizer.step()
+        if step % 200 == 0:
+            target.load_state_dict(network.state_dict())
+        return {
+            "step": step,
+            "loss": float(loss.detach()),
+            "td_loss": float(td_loss.detach()),
+            "cql_penalty": float(conservative.detach()),
+            "behavior_loss": float(bc_loss.detach()),
+            "history_consistency_loss": float(consistency_loss.detach()),
+        }
 
     def train(self, dataset, output):
         config = self.config
@@ -170,6 +289,12 @@ class PolicyTrainer:
             raise ValueError("No identified training transitions")
         counts = np.zeros((len(GROUPS), len(ACTION_NAMES)), dtype=np.int64)
         np.add.at(counts, (arrays["groups"][rows], arrays["actions"][rows]), 1)
+        context_counts = phase_counts(
+            arrays["observations"][rows],
+            arrays["groups"][rows],
+            arrays["actions"][rows],
+            metadata["feature_names"],
+        )
         output = Path(output)
         output.mkdir(parents=True, exist_ok=False)
         run = {
@@ -188,6 +313,7 @@ class PolicyTrainer:
                 "observation_masks": file_digest(observation_masks.__file__),
                 "targets": file_digest(Path(__file__).with_name("targets.py")),
                 "consistency": file_digest(Path(__file__).with_name("consistency.py")),
+                "support": file_digest(Path(support_contract.__file__)),
             },
         }
         if config.algorithm == "iql":
@@ -228,7 +354,9 @@ class PolicyTrainer:
             support = torch.as_tensor(counts >= config.minimum_support, device=config.device)
             class_counts = counts.sum(axis=0)
             weights = np.zeros(len(ACTION_NAMES), dtype=np.float32)
-            weights[class_counts > 0] = np.sqrt(class_counts.sum() / class_counts[class_counts > 0])
+            weights[class_counts > 0] = (
+                class_counts.sum() / class_counts[class_counts > 0]
+            ) ** config.class_weight_exponent
             weights[class_counts > 0] /= weights[class_counts > 0].mean()
             class_weights = torch.as_tensor(weights, device=config.device)
             augmenter = ObservationAugmenter(
@@ -236,6 +364,8 @@ class PolicyTrainer:
             )
 
             last = {}
+            checkpoints = []
+            best_state, best_key, best_step, stale = None, None, 0, 0
             for step in range(1, config.steps + 1):
                 chosen = rng.choice(rows, size=config.batch_size)
                 batch = {key: value[chosen].to(config.device) for key, value in tensors.items()}
@@ -261,43 +391,51 @@ class PolicyTrainer:
                     last = {"step": step, **implicit.step(batch)}
                     if step % 1000 == 0 or step == config.steps:
                         atomic_json(output / "progress.json", last)
-                    continue
-                q, logits = network(batch["observations"])
-                observed = q.gather(1, batch["actions"][:, None]).squeeze(1)
-                bc_loss = F.cross_entropy(
-                    logits.masked_fill(~batch["action_masks"], -1e9),
-                    batch["actions"],
-                    weight=class_weights,
-                )
-                if config.algorithm == "cql":
-                    targets = critic_targets(network, target, batch, support, config)
-                    td_loss = F.smooth_l1_loss(observed, targets)
-                    conservative = (
-                        torch.logsumexp(q.masked_fill(~batch["action_masks"], -1e9), 1) - observed
-                    ).mean()
-                    loss = td_loss + config.alpha * conservative + 0.25 * bc_loss
                 else:
-                    td_loss = conservative = torch.zeros((), device=config.device)
-                    loss = bc_loss
-                loss = loss + config.history_consistency_weight * consistency_loss
-                if not torch.isfinite(loss):
-                    raise RuntimeError("Non-finite optimizer loss")
-                optimizer.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(network.parameters(), 5, error_if_nonfinite=True)
-                optimizer.step()
-                if step % 200 == 0:
-                    target.load_state_dict(network.state_dict())
+                    last = self._explicit_update(
+                        network,
+                        target,
+                        optimizer,
+                        batch,
+                        class_weights,
+                        support,
+                        consistency_loss,
+                        step,
+                    )
+                if config.evaluation_interval and (
+                    step % config.evaluation_interval == 0 or step == config.steps
+                ):
+                    key, diagnostic = checkpoint_diagnostics(
+                        network,
+                        arrays,
+                        metadata,
+                        validation & training_scope,
+                        counts,
+                        config,
+                        context_counts,
+                    )
+                    checkpoints.append({"step": step, **diagnostic})
+                    if best_key is None or key > best_key:
+                        best_state, best_key, best_step, stale = (
+                            copy.deepcopy(network.state_dict()),
+                            key,
+                            step,
+                            0,
+                        )
+                    else:
+                        stale += 1
+                    atomic_json(
+                        output / "checkpoints.json",
+                        {"checkpoints": checkpoints, "best_step": best_step},
+                    )
+                    if stale >= config.early_stopping_patience:
+                        break
                 if step % 1000 == 0 or step == config.steps:
-                    last = {
-                        "step": step,
-                        "loss": float(loss.detach()),
-                        "td_loss": float(td_loss.detach()),
-                        "cql_penalty": float(conservative.detach()),
-                        "behavior_loss": float(bc_loss.detach()),
-                        "history_consistency_loss": float(consistency_loss.detach()),
-                    }
                     atomic_json(output / "progress.json", last)
+                network.train()
+            completed_steps = step
+            if best_state is not None:
+                network.load_state_dict(best_state)
             network.eval()
             selected = validation
             predicted, values = predict(
@@ -307,6 +445,8 @@ class PolicyTrainer:
                 arrays["action_masks"][selected],
                 counts,
                 config,
+                names=metadata["feature_names"],
+                context_counts=context_counts,
             )
             truth = arrays["actions"][selected]
             metrics = behavior_metrics(truth, predicted, len(ACTION_NAMES))
@@ -331,7 +471,10 @@ class PolicyTrainer:
                 "identified_training_terminal_rows": int(np.sum(arrays["terminals"][rows])),
                 "holdout_matches": sorted(set(arrays["match_ids"][holdout])),
                 "validation_transitions": int(validation.sum()),
-                "optimizer_steps": config.steps,
+                "optimizer_steps": completed_steps,
+                "selected_checkpoint_step": best_step or completed_steps,
+                "checkpoints": checkpoints,
+                "counts_by_phase": context_counts.tolist(),
                 "counts_by_group": counts.tolist(),
                 "action_counts": class_counts.tolist(),
                 "validation": metrics,

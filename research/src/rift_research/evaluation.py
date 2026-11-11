@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 from rift_common.actions import ACTION_NAMES, GROUPS, ROLES, Action
-from rift_common.artifacts import atomic_json, file_digest
+from rift_common.artifacts import atomic_json, file_digest, read_json
 from rift_common.coaching import DESTINATIONS
 from rift_common.dataset import load_dataset
 from rift_common.metrics import behavior_metrics
@@ -87,7 +87,15 @@ def describe_dataset(path):
 
 
 def evaluate_policy(
-    dataset, bundle, output, *, samples=500, new_matches=False, stress=False, match_ids=None
+    dataset,
+    bundle,
+    output,
+    *,
+    samples=500,
+    new_matches=False,
+    stress=False,
+    match_ids=None,
+    project_state=False,
 ):
     from offline_rift.inference.coach import load_policy
 
@@ -96,6 +104,39 @@ def evaluate_policy(
         raise FileExistsError(output)
     arrays, metadata = load_dataset(dataset)
     policy = load_policy(bundle)
+    projection = None
+    if project_state:
+        from rift_common.items import ItemCatalog
+        from rift_common.state import StateEncoder
+
+        source_names = metadata["feature_names"]
+        target_names = policy.metadata["feature_names"]
+        canonical = StateEncoder(
+            ItemCatalog(metadata["item_catalog"]), schema="decision-state-v1"
+        ).names
+        if (
+            not new_matches
+            or metadata["state_schema"] != "decision-state-v2"
+            or policy.metadata["state_schema"] != "decision-state-v1"
+            or target_names != canonical
+            or source_names[: len(canonical)] != canonical
+        ):
+            raise ValueError(
+                "Only explicit new-match v2-to-v1 canonical baseline projection is supported"
+            )
+        arrays = {
+            **arrays,
+            **{
+                key: arrays[key][:, : len(canonical)]
+                for key in ("observations", "next_observations")
+            },
+        }
+        projection = {
+            "from": metadata["state_schema"],
+            "to": policy.metadata["state_schema"],
+            "dropped_features": source_names[len(canonical) :],
+        }
+        metadata = {**metadata, "feature_names": target_names}
     report = policy.metadata["training_report"]
     training, validation = set(report["training_matches"]), set(report["validation_matches"])
     if not training or not validation or training & validation:
@@ -166,6 +207,7 @@ def evaluate_policy(
             / ("coach.json" if (Path(bundle) / "coach.json").exists() else "bundle.json")
         ),
         "algorithm": policy.algorithm,
+        "state_projection": projection,
         "evaluation_mode": "new_matches" if new_matches else "frozen_validation",
         "validation_matches": sorted(validation),
         "evaluated_matches": sorted(evaluated_matches),
@@ -309,6 +351,18 @@ def evaluate_policy(
         for scope, child in policy.policies.items():
             if scope in result["per_group"]:
                 result["per_group"][scope]["algorithm"] = child.algorithm
+    identified = arrays["action_identified"][mask]
+    for i, group in enumerate(GROUPS):
+        rows = (arrays["groups"][mask] == i) & identified
+        if group not in result["per_group"]:
+            continue
+        result["per_group"][group]["identified_rows"] = int(rows.sum())
+        result["per_group"][group]["identified_majority_agreement"] = (
+            float(np.mean(truth[rows] == policy.counts[i].argmax())) if rows.any() else None
+        )
+        result["per_group"][group]["identified_match_bootstrap"] = identified_bootstrap(
+            truth[rows], predicted[rows], arrays["match_ids"][mask][rows], samples=samples
+        )
     output.mkdir(parents=True, exist_ok=False)
     np.savez_compressed(
         output / "predictions.npz",
@@ -319,7 +373,133 @@ def evaluate_policy(
         teams=arrays["teams"][mask],
         timestamps=arrays["timestamps"][mask],
         actors=arrays["actors"][mask],
+        identified=arrays["action_identified"][mask],
         scores=scores,
     )
     atomic_json(output / "report.json", result)
+    return result
+
+
+def identified_bootstrap(truth, predicted, matches, *, samples=500):
+    """Resample whole matches, keeping correlated perspectives together."""
+    if not len(truth):
+        return None
+    identifiers, inverse = np.unique(matches, return_inverse=True)
+    matrices = np.zeros((len(identifiers), len(ACTION_NAMES), len(ACTION_NAMES) + 1), dtype=int)
+    np.add.at(matrices, (inverse, truth, np.where(predicted < 0, len(ACTION_NAMES), predicted)), 1)
+    rng = np.random.default_rng(20261110)
+    estimates = []
+    for _ in range(samples):
+        matrix = matrices[rng.integers(len(identifiers), size=len(identifiers))].sum(0)
+        denominator = matrix.sum(1) + matrix[:, :-1].sum(0)
+        f1 = np.divide(
+            2 * matrix[:, :-1].diagonal(),
+            denominator,
+            out=np.zeros(len(ACTION_NAMES)),
+            where=denominator > 0,
+        )
+        estimates.append(float(f1[denominator > 0].mean()))
+    return {
+        "macro_f1_95": np.quantile(estimates, [0.025, 0.975]).tolist(),
+        "matches_with_identified_evidence": len(identifiers),
+        "samples": samples,
+        "unit": "match; recurring players may remain dependent",
+    }
+
+
+def compare_holdout(previous, candidate, destination, *, samples=1000):
+    """Compare fixed products on exactly the same unseen rows with paired match bootstrap."""
+    paths = {"previous": Path(previous), "candidate": Path(candidate)}
+    if samples < 1:
+        raise ValueError("Positive paired bootstrap samples required")
+    reports = {name: read_json(path / "report.json") for name, path in paths.items()}
+    predictions = {}
+    for name, path in paths.items():
+        with np.load(path / "predictions.npz", allow_pickle=False) as archive:
+            predictions[name] = dict(archive)
+    first, second = predictions["previous"], predictions["candidate"]
+    keys = ("truth", "match_ids", "groups", "teams", "timestamps", "actors", "identified")
+    if (
+        any(not np.array_equal(first[k], second[k]) for k in keys)
+        or reports["previous"]["dataset_sha256"] != reports["candidate"]["dataset_sha256"]
+    ):
+        raise ValueError("Holdout comparisons require exactly matching measured rows and data")
+    if any(r["evaluation_mode"] != "new_matches" for r in reports.values()):
+        raise ValueError("Holdout comparison requires unseen matches")
+    result = {
+        "models": {
+            name: {"bundle": report["bundle"], "bundle_sha256": report["bundle_sha256"]}
+            for name, report in reports.items()
+        },
+        "per_scope": [],
+        "paired_differences": [],
+        "matches": sorted(set(first["match_ids"])),
+        "samples": samples,
+        "meaning": "Fixed-product comparison on unseen European matches. Paired bootstrap resamples whole matches; recurring players can remain dependent. F1 measures recorded-activity agreement, not strategic quality or win rate. Multiple development changes prevent isolated causal attribution.",
+    }
+    identifiers, inverse = np.unique(first["match_ids"], return_inverse=True)
+    for scope in ("TEAM", *ROLES):
+        rows = (first["groups"] == GROUPS.index(scope)) & first["identified"]
+        matrices = {}
+        for name, predicted in predictions.items():
+            matrices[name] = np.zeros((len(identifiers), len(Action), len(Action) + 1), dtype=int)
+            np.add.at(
+                matrices[name],
+                (
+                    inverse[rows],
+                    first["truth"][rows],
+                    np.where(
+                        predicted["predicted"][rows] < 0, len(Action), predicted["predicted"][rows]
+                    ),
+                ),
+                1,
+            )
+            metrics = reports[name]["per_group"][scope]
+            result["per_scope"].append(
+                {
+                    "model": name,
+                    "scope": scope,
+                    "identified_rows": int(rows.sum()),
+                    "identified_f1": (metrics["identified"] or {}).get("macro_f1"),
+                    "identified_agreement": (metrics["identified"] or {}).get("behavior_agreement"),
+                    "coverage": metrics["retention_coverage"],
+                    "identified_majority_agreement": metrics["identified_majority_agreement"],
+                    "bootstrap": metrics["identified_match_bootstrap"],
+                }
+            )
+        rng = np.random.default_rng(20261110)
+        differences = []
+        for _ in range(samples):
+            sampled = rng.integers(len(identifiers), size=len(identifiers))
+            estimates = {}
+            for name, matrix in matrices.items():
+                aggregate = matrix[sampled].sum(0)
+                denominator = aggregate.sum(1) + aggregate[:, :-1].sum(0)
+                if not (denominator > 0).any():
+                    break
+                estimates[name] = np.divide(
+                    2 * aggregate[:, :-1].diagonal(),
+                    denominator,
+                    out=np.zeros(len(Action)),
+                    where=denominator > 0,
+                )[denominator > 0].mean()
+            if len(estimates) == 2:
+                differences.append(estimates["candidate"] - estimates["previous"])
+        result["paired_differences"].append(
+            {
+                "scope": scope,
+                "point_difference": reports["candidate"]["per_group"][scope]["identified"][
+                    "macro_f1"
+                ]
+                - reports["previous"]["per_group"][scope]["identified"]["macro_f1"]
+                if rows.any()
+                else None,
+                "f1_difference_95": np.quantile(differences, [0.025, 0.975]).tolist()
+                if differences
+                else None,
+                "valid_resamples": len(differences),
+                "identified_rows": int(rows.sum()),
+            }
+        )
+    atomic_json(Path(destination), result)
     return result

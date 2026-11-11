@@ -30,8 +30,11 @@
     ],
     "split_seed": 42,
     "optimizer_seed": 42,
-    "steps": 10000,
-    "selection": "noncollapsed CQL then within-scope identified development F1; BC is diagnostic",
-    "holdout": "frozen IDs before training; never select on holdout"
+    "steps": 4000,
+    "selection": "All algorithms eligible; development gate then mean clean/cold identified F1 minus 0.1 times still-feasible switching",
+    "holdout": "frozen IDs before training; never select on holdout",
+    "study_design": "relative-context-v2",
+    "checkpoint_interval": 500,
+    "early_stopping_patience": 3
   }
 }
