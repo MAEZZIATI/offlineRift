@@ -40,4 +40,17 @@ spec -> tests -> implementation -> docs -> lint/types/tests pass.
 - Small diffs. One task at a time. Say what you changed and what you did not.
 - If a spec is ambiguous, stop and ask instead of guessing.
 
+## Phase 1 commands and scope
+- Python 3.11+, uv workspace; `make setup` installs locked dependencies/hooks.
+- `make check` runs Ruff lint/format, strict mypy and offline pytest.
+- `make smoke` checks CPU CLI interruption/resume; `make build` builds all packages.
+- Authenticated `kaggle-*` Makefile targets are USER-RUN ONLY. Never invoke them
+  as an agent, in tests or CI; never inspect credential files or environment secrets.
+- Kaggle is training compute for the user's own privately staged Riot data;
+  do not import third-party Kaggle training datasets.
+- Phase 1 is foundation only. No crawling, feature/model implementations,
+  experiment results, serving endpoints or product UI. Stop after this phase.
+- Read `docs/phase1/SPEC.md`, `TASKS.md`, `KAGGLE.md` and `docs/adr/` for foundation
+  acceptance gates, exact files to touch, workflow and decisions.
+
 Full project brief: docs/brief/FULL_BRIEF.md. Read only the sections relevant to the current phase.
