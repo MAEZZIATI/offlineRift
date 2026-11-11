@@ -39,3 +39,5 @@ spec -> tests -> implementation -> docs -> lint/types/tests pass.
 ## Working style
 - Small diffs. One task at a time. Say what you changed and what you did not.
 - If a spec is ambiguous, stop and ask instead of guessing.
+
+Full project brief: docs/brief/FULL_BRIEF.md. Read only the sections relevant to the current phase.
