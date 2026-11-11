@@ -1,22 +1,22 @@
 # Graph Report - offlineRift  (2026-11-11)
 
 ## Corpus Check
-- 115 files · ~67,960 words
+- 114 files · ~67,912 words
 - Verdict: corpus is large enough that graph structure adds value.
-- Unclassified: 7 file(s) not represented in the graph (top: .css 3, (none) 2, .graphify-bak 1)
+- Unclassified: 6 file(s) not represented in the graph (top: .css 3, (none) 2, .ipynb 1)
 
 ## Summary
-- 1303 nodes · 3984 edges · 76 communities (63 shown, 13 thin omitted)
-- Extraction: 88% EXTRACTED · 12% INFERRED · 0% AMBIGUOUS · INFERRED: 479 edges (avg confidence: 0.88)
+- 1303 nodes · 3971 edges · 73 communities (63 shown, 10 thin omitted)
+- Extraction: 88% EXTRACTED · 12% INFERRED · 0% AMBIGUOUS · INFERRED: 475 edges (avg confidence: 0.88)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `7d90c37b`
+- Built from commit: `2f072053`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
-- Action
+- offline_rift/workflow.py
 - offline_rift/workflow.py
 - s
 - artifacts.py
@@ -31,7 +31,7 @@
 - bh
 - st
 - types.ts
-- StateEncoder
+- test_workflow.py
 - test_six_real_models_are_scope_trained_reload_route_and_detect_corruption
 - numpy
 - main.cjs
@@ -48,14 +48,14 @@
 - Eo
 - LiveClientInference
 - t1
-- evaluate_policy
+- Action
 - test_hud_service.py
 - server.py
-- transport.py
+- artifacts.py
 - fixture.tsx
 - Hl
 - live_client.py
-- SessionCapture
+- notebook_section
 - L
 - zh
 - LiveHudService
@@ -74,17 +74,14 @@
 - Modeling contract
 - desktop/package.json
 - .recommend
-- HudServer
 - as
 - Th
 - Offline Rift desktop HUD
 - Offline Rift
 - European development and game review — 2026-11-10
-- conftest.py
 - test_architecture.py
 - Later ranked acceptance: show, record and review advice
 - vitest
-- test_compiled_hud_model_role_and_withdrawal
 - .prettierrc.json
 - l
 - fixtures/macro-hud/package.json
@@ -105,29 +102,29 @@
 10. `NextActionPolicy` - 29 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `test_ctrl_c_notifies_native_host_even_when_windows_proxy_has_exited()` --uses--> `MacroCoach`  [INFERRED]
-  tests/test_hud_desktop.py → production/src/offline_rift/inference/coach.py
+- `test_subject_changes_share_snapshot_but_not_cached_advice()` --calls--> `LiveClientUnavailable`  [INFERRED]
+  tests/test_hud_service.py → production/src/offline_rift/inference/transport.py
 - `test_local_desktop_api_validates_context_and_keeps_assets_local()` --uses--> `HudServer`  [INFERRED]
   tests/test_hud_service.py → production/src/offline_rift/ui/server.py
+- `test_ctrl_c_notifies_native_host_even_when_windows_proxy_has_exited()` --uses--> `MacroCoach`  [INFERRED]
+  tests/test_hud_desktop.py → production/src/offline_rift/inference/coach.py
 - `Maintained tools` --references--> `synthesize()`  [INFERRED]
   research/README.md → research/src/rift_research/reporting.py
-- `MacroCoach` --uses--> `Action`  [INFERRED]
-  production/src/offline_rift/inference/coach.py → common/src/rift_common/actions.py
-- `NextActionPolicy` --uses--> `Action`  [INFERRED]
-  production/src/offline_rift/inference/policy.py → common/src/rift_common/actions.py
+- `dashboard()` --uses--> `LiveStateAdapter`  [INFERRED]
+  tests/test_hud_service.py → production/src/offline_rift/inference/live_client.py
 
 ## Import Cycles
 - None detected.
 
-## Communities (76 total, 13 thin omitted)
+## Communities (73 total, 10 thin omitted)
 
-### Community 0 - "Action"
-Cohesion: 0.06
-Nodes (26): Action, feasible_actions(), action_support(), bellman_target(), OptionNetwork, rank_options(), phase_counts(), phase_indices() (+18 more)
+### Community 0 - "offline_rift/workflow.py"
+Cohesion: 0.07
+Nodes (14): bellman_target(), train_coach(), expectile_loss(), IQLUpdate, critic_targets(), main(), PolicyTrainer, TrainConfig (+6 more)
 
 ### Community 1 - "offline_rift/workflow.py"
-Cohesion: 0.06
-Nodes (18): run_id(), Collector, load_api_key(), RiotAPIError, RiotClient, main(), Workflow, test_collection_pagination_dedup_resume_and_interruption() (+10 more)
+Cohesion: 0.09
+Nodes (10): run_id(), Collector, load_api_key(), RiotAPIError, RiotClient, main(), Workflow, test_collection_pagination_dedup_resume_and_interruption() (+2 more)
 
 ### Community 2 - "s"
 Cohesion: 0.12
@@ -135,15 +132,15 @@ Nodes (56): a1(), b1(), cn(), de(), ef(), id(), Ii(), Il() (+48 more)
 
 ### Community 3 - "artifacts.py"
 Cohesion: 0.07
-Nodes (14): group_index(), ActivityEvidence, Behavior, distance(), player_activity(), player_behavior(), team_activity(), team_behavior() (+6 more)
+Nodes (21): group_index(), ActivityEvidence, Behavior, distance(), player_activity(), player_behavior(), team_activity(), team_behavior() (+13 more)
 
 ### Community 4 - "sd"
 Cohesion: 0.10
 Nodes (50): a0(), Ac(), ad(), ai(), Be(), Bu(), Cc(), Ce() (+42 more)
 
 ### Community 5 - "atomic_json"
-Cohesion: 0.10
-Nodes (27): atomic_json(), file_digest(), read_json(), verify_bundle_manifest(), write_bundle_manifest(), CatalogCache, patch_of(), review_adherence() (+19 more)
+Cohesion: 0.11
+Nodes (26): atomic_json(), file_digest(), read_json(), verify_bundle_manifest(), write_bundle_manifest(), CatalogCache, patch_of(), review_adherence() (+18 more)
 
 ### Community 6 - "ud"
 Cohesion: 0.11
@@ -154,8 +151,8 @@ Cohesion: 0.07
 Nodes (34): { contextBridge, ipcRenderer }, devDependencies, electron@45.2.3, @electron/packager@20.3.0, jsdom@^26.1.0, @playwright/test@1.51.1, prettier@3.6.2, tailwindcss@^4.1.0 (+26 more)
 
 ### Community 8 - "NextActionPolicy"
-Cohesion: 0.12
-Nodes (14): alignment(), withhold_conflicting_role(), load_policy(), MacroCoach, NextActionPolicy, assemble_coach(), reselect_coach(), scope_diagnostics() (+6 more)
+Cohesion: 0.13
+Nodes (12): alignment(), withhold_conflicting_role(), load_policy(), MacroCoach, NextActionPolicy, assemble_coach(), reselect_coach(), select_candidate() (+4 more)
 
 ### Community 9 - "b0"
 Cohesion: 0.09
@@ -181,17 +178,17 @@ Nodes (29): Bt(), Dm(), _f(), g0(), h0(), Ic(), ju(), Ke() (+21 more)
 Cohesion: 0.14
 Nodes (20): createHudStore(), flush(), update(), HudSnapshot, shared(), StoreOptions, clockSeconds(), Coordination (+12 more)
 
-### Community 15 - "StateEncoder"
-Cohesion: 0.13
-Nodes (6): ItemCatalog, _mean(), StateEncoder, test_role_and_scope_conditioning_and_feasibility(), test_unknown_event_attribution_stays_masked(), test_relative_features_preserve_v1_prefix_and_unknown_operands()
+### Community 15 - "test_workflow.py"
+Cohesion: 0.39
+Nodes (8): prepare(), test_activation_retains_previous_reference_and_verifies_first(), test_failed_training_does_not_publish_latest_model(), test_immutable_build_cache_reuse_and_changed_input(), test_legacy_workflow_is_rejected_without_modification(), test_ranked_roster_registers_verified_unique_players_and_preserves_primary(), test_reload_parity_failure_preserves_active_model_and_failed_report(), test_reused_model_is_reloaded_and_rejects_corruption()
 
 ### Community 16 - "test_six_real_models_are_scope_trained_reload_route_and_detect_corruption"
-Cohesion: 0.19
-Nodes (14): DatasetBuilder, load_dataset(), main(), PolicyTrainer, TrainConfig, test_six_real_models_are_scope_trained_reload_route_and_detect_corruption(), test_explicit_duration_terminal_rewards_all_roles_and_integrity(), test_ambiguous_rows_keep_exact_episodes_and_are_not_training_support() (+6 more)
+Cohesion: 0.16
+Nodes (12): DatasetBuilder, load_dataset(), ItemCatalog, StateEncoder, test_six_real_models_are_scope_trained_reload_route_and_detect_corruption(), test_explicit_duration_terminal_rewards_all_roles_and_integrity(), test_ambiguous_rows_keep_exact_episodes_and_are_not_training_support(), test_development_checkpoint_is_restored_and_phase_support_reloads() (+4 more)
 
 ### Community 17 - "numpy"
-Cohesion: 0.18
-Nodes (13): behavior_metrics(), evidence_patterns(), conditional_coverage(), _confidence(), fit_evidence_thresholds(), _summary(), match_coverage(), minimax_decision() (+5 more)
+Cohesion: 0.09
+Nodes (25): feasible_actions(), episode_returns(), behavior_metrics(), evidence_patterns(), ObservationAugmenter, scope_diagnostics(), history_consistency(), checkpoint_diagnostics() (+17 more)
 
 ### Community 18 - "main.cjs"
 Cohesion: 0.12
@@ -212,12 +209,12 @@ Cohesion: 0.23
 Nodes (24): $1(), Aa(), At(), ba(), br(), ci(), eh(), En() (+16 more)
 
 ### Community 20 - "LiveDataSource"
-Cohesion: 0.15
-Nodes (12): LiveClientUnavailable, LiveDataSource, test_restart_changes_session_and_offline_withdraws_hud(), test_subject_changes_share_snapshot_but_not_cached_advice(), test_explicit_local_and_injected_sessions_do_not_use_windows(), test_missing_windows_interop_and_native_auto(), test_transport_cannot_target_remote_urls(), test_windows_certificate_path_is_translated() (+4 more)
+Cohesion: 0.19
+Nodes (10): LiveClientUnavailable, LiveDataSource, test_explicit_local_and_injected_sessions_do_not_use_windows(), test_missing_windows_interop_and_native_auto(), test_transport_cannot_target_remote_urls(), test_windows_certificate_path_is_translated(), test_windows_errors_are_recoverable_offline_states(), test_windows_rejects_redirects_and_invalid_responses() (+2 more)
 
 ### Community 21 - "read_match"
-Cohesion: 0.23
-Nodes (10): ObjectiveRules, ObjectiveTracker, Observation, PlayerState, read_match(), LiveStateAdapter, test_actual_frames_causal_items_and_no_final_stats(), test_training_live_feature_parity_and_role_identity() (+2 more)
+Cohesion: 0.35
+Nodes (4): ObjectiveRules, ObjectiveTracker, test_herald_single_spawn_and_conservative_uncertainty(), test_soul_counts_same_team_and_unknown_subtype_masks_availability()
 
 ### Community 22 - "runtime.tsx"
 Cohesion: 0.14
@@ -248,24 +245,28 @@ Cohesion: 0.15
 Nodes (15): ar(), bo(), ch(), dh(), Eo(), fh(), Fv(), Kr() (+7 more)
 
 ### Community 30 - "LiveClientInference"
-Cohesion: 0.36
-Nodes (9): LiveClientInference, live_data(), test_active_player_is_not_silently_replaced_with_team(), test_capture_is_disabled_by_default_and_interrupt_retains_progress(), test_future_history_marker_cannot_enable_objectives_and_game_end_clears_advice(), test_history_rollbacks_duplicate_clock_and_incomplete_events(), test_opt_in_availability_capture_masks_history_and_excludes_identity(), test_session_capture_explicit_champion_adc_and_name_redaction() (+1 more)
+Cohesion: 0.16
+Nodes (12): LiveClientInference, LiveStateAdapter, SessionCapture, live_data(), test_active_player_is_not_silently_replaced_with_team(), test_capture_is_disabled_by_default_and_interrupt_retains_progress(), test_future_history_marker_cannot_enable_objectives_and_game_end_clears_advice(), test_history_rollbacks_duplicate_clock_and_incomplete_events() (+4 more)
 
 ### Community 31 - "t1"
 Cohesion: 0.27
 Nodes (14): Au(), Bs(), eu(), fd(), hu(), Jc(), l1(), ni() (+6 more)
 
-### Community 32 - "evaluate_policy"
-Cohesion: 0.19
-Nodes (4): coordination_metrics(), evaluate_policy(), identified_bootstrap(), test_coordinator_counts_withheld_missing_and_independent_pairs()
+### Community 32 - "Action"
+Cohesion: 0.15
+Nodes (12): Action, action_support(), OptionNetwork, rank_options(), phase_counts(), phase_indices(), phase_support(), coordination_metrics() (+4 more)
 
 ### Community 33 - "test_hud_service.py"
-Cohesion: 0.17
-Nodes (5): dashboard(), test_hud_pairs_actual_macro_and_selected_role_without_calibrated_metrics(), test_local_desktop_api_validates_context_and_keeps_assets_local(), test_missing_role_uses_team_policy_without_guessing(), test_scoped_diagnostics_use_the_selected_role()
+Cohesion: 0.14
+Nodes (7): dashboard(), test_hud_pairs_actual_macro_and_selected_role_without_calibrated_metrics(), test_local_desktop_api_validates_context_and_keeps_assets_local(), test_missing_role_uses_team_policy_without_guessing(), test_restart_changes_session_and_offline_withdraws_hud(), test_scoped_diagnostics_use_the_selected_role(), test_subject_changes_share_snapshot_but_not_cached_advice()
 
 ### Community 34 - "server.py"
-Cohesion: 0.23
-Nodes (3): add_ui_arguments(), main(), run_hud()
+Cohesion: 0.10
+Nodes (8): launch_desktop(), _windows_local_executable(), add_ui_arguments(), main(), run_hud(), test_compiled_hud_model_role_and_withdrawal(), configure(), frame()
+
+### Community 35 - "artifacts.py"
+Cohesion: 0.09
+Nodes (3): main(), numbers(), canonical_champion()
 
 ### Community 36 - "fixture.tsx"
 Cohesion: 0.18
@@ -276,8 +277,8 @@ Cohesion: 0.18
 Nodes (12): bn(), Da(), dr(), Ga(), Hl(), ie(), _n(), nr() (+4 more)
 
 ### Community 38 - "live_client.py"
-Cohesion: 0.25
-Nodes (4): AdviceController, main(), test_retained_role_advice_uses_fresh_macro_direction_and_rechecks_alignment(), test_advice_persistence_requires_support_and_clears_on_death()
+Cohesion: 0.43
+Nodes (3): AdviceController, test_retained_role_advice_uses_fresh_macro_direction_and_rechecks_alignment(), test_advice_persistence_requires_support_and_clears_on_death()
 
 ### Community 40 - "L"
 Cohesion: 0.42
@@ -286,6 +287,10 @@ Nodes (11): L(), gh(), yh(), M(), Nt(), O(), Ot(), ql() (+3 more)
 ### Community 41 - "zh"
 Cohesion: 0.20
 Nodes (10): ee(), hh(), Qi(), sn(), Uo(), vh(), al(), H() (+2 more)
+
+### Community 42 - "LiveHudService"
+Cohesion: 0.16
+Nodes (5): action_catalog(), HudServer, LiveHudService, test_windows_native_hud_starts_and_closes_after_ctrl_c(), test_lifetime_connection_delivers_shutdown_even_after_the_process_proxy_exits()
 
 ### Community 43 - "README.md"
 Cohesion: 0.22
@@ -339,10 +344,6 @@ Nodes (6): Composition and evaluation, Modeling contract, Objective and scope, O
 Cohesion: 0.29
 Nodes (6): author, description, license, main, name, version
 
-### Community 58 - "HudServer"
-Cohesion: 0.43
-Nodes (3): HudServer, test_windows_native_hud_starts_and_closes_after_ctrl_c(), test_lifetime_connection_delivers_shutdown_even_after_the_process_proxy_exits()
-
 ### Community 59 - "as"
 Cohesion: 0.29
 Nodes (7): as(), cr(), If(), jm(), ll(), Pi(), Zs()
@@ -371,10 +372,6 @@ Nodes (4): After the game, Before loading the map, Later ranked acceptance: show
 Cohesion: 0.40
 Nodes (4): @testing-library/react@^16.3.0, vitest@4.0.18, @testing-library/react, vitest
 
-### Community 68 - "test_compiled_hud_model_role_and_withdrawal"
-Cohesion: 0.50
-Nodes (3): test_compiled_hud_model_role_and_withdrawal(), configure(), frame()
-
 ### Community 69 - ".prettierrc.json"
 Cohesion: 0.50
 Nodes (3): printWidth, singleQuote, trailingComma
@@ -386,22 +383,22 @@ Nodes (4): tm(), e(), l(), t()
 ## Knowledge Gaps
 - **2 isolated node(s):** `offline-rift`, `offline-rift-research`
   These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 335 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **13 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **10 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `bh()` connect `bh` to `s`, `sd`, `ud`, `b0`, `D`, `index-wRf3c-mw.js`, `st`, `Fl`, `Lo`, `Eo`, `t1`, `Hl`, `L`, `zh`, `G`, `jd`, `e1`, `os`, `zr`, `as`, `Th`, `l`?**
-  _High betweenness centrality (0.136) - this node is a cross-community bridge._
+  _High betweenness centrality (0.148) - this node is a cross-community bridge._
 - **Are the 40 inferred relationships involving `bh()` (e.g. with `_0()` and `$1()`) actually correct?**
   _`bh()` has 40 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `offline-rift`, `offline-rift-research` to the rest of the system?**
   _2 weakly-connected nodes found - possible documentation gaps or missing edges._
-- **Should `Action` be split into smaller, more focused modules?**
-  _Cohesion score 0.058385093167701865 - nodes in this community are weakly interconnected._
+- **Should `offline_rift/workflow.py` be split into smaller, more focused modules?**
+  _Cohesion score 0.07293868921775898 - nodes in this community are weakly interconnected._
 - **Why does `synthesize()` connect `atomic_json` to `artifacts.py`, `README.md`?**
-  _High betweenness centrality (0.047) - this node is a cross-community bridge._
+  _High betweenness centrality (0.034) - this node is a cross-community bridge._
 - **Are the 4 inferred relationships involving `s()` (e.g. with `os()` and `a()`) actually correct?**
   _`s()` has 4 INFERRED edges - model-reasoned connections that need verification._
 - **Should `offline_rift/workflow.py` be split into smaller, more focused modules?**
-  _Cohesion score 0.061018437225636525 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.08758503401360544 - nodes in this community are weakly interconnected._

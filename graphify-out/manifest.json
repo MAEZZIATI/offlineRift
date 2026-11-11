@@ -1,10 +1,4 @@
 {
-  ".codex/hooks.json": {
-    "mtime": 1794355118.4971352,
-    "seen": 1794355219.590682,
-    "ast_hash": "94c045871499746cdd6005c544aa8596",
-    "semantic_hash": ""
-  },
   "common/src/rift_common/__init__.py": {
     "mtime": 1794316264.1762912,
     "seen": 1794355219.590687,
@@ -228,9 +222,9 @@
     "semantic_hash": ""
   },
   "production/src/offline_rift/inference/live_client.py": {
-    "mtime": 1794316264.186291,
-    "seen": 1794355219.5907204,
-    "ast_hash": "8a6f77a91b8939d93ff68e0b6878db2a",
+    "mtime": 1794356974.625134,
+    "seen": 1794356977.9542873,
+    "ast_hash": "864d5e6a7dec4ad84495b5194e6d626c",
     "semantic_hash": ""
   },
   "production/src/offline_rift/inference/policy.py": {
@@ -570,9 +564,9 @@
     "semantic_hash": ""
   },
   "tests/test_live.py": {
-    "mtime": 1794326942.157801,
-    "seen": 1794355219.590769,
-    "ast_hash": "a888484d080ab1e2aa2ad5438ad0bef8",
+    "mtime": 1794356974.7145605,
+    "seen": 1794356977.954397,
+    "ast_hash": "15935e6ee1f0ba8c69ccad6e2c214410",
     "semantic_hash": ""
   },
   "tests/test_model_improvements.py": {

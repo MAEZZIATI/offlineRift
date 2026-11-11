@@ -221,7 +221,7 @@ def test_session_capture_explicit_champion_adc_and_name_redaction(tmp_path, cata
         audit_session(tmp_path / "session", tmp_path / "audit")
 
 
-def test_swiftplay_capture_survives_withheld_out_of_scope_advice(tmp_path, catalog):
+def test_swiftplay_capture_uses_ranked_policy_for_summoners_rift(tmp_path, catalog):
     policy = Mock(encoder=StateEncoder(catalog))
     data = live_data()
     data["gameData"]["gameMode"] = "SWIFTPLAY"
@@ -231,9 +231,8 @@ def test_swiftplay_capture_survives_withheld_out_of_scope_advice(tmp_path, catal
     client = LiveClientInference(
         policy=policy, session=session, capture_session=tmp_path / "session"
     )
-    with pytest.raises(ValueError, match="game mode"):
-        client.infer_once()
-    policy.recommend.assert_not_called()
+    client.infer_once()
+    policy.recommend.assert_called_once()
     client.close()
     assert read_json(tmp_path / "session/report.json")["samples"] == 1
     assert (
