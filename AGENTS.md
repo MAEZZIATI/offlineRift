@@ -1,110 +1,41 @@
-# Offline Rift repository instructions
+# AGENTS.md
 
-## Objective and structure
+## Project
+Post-game decision-review coach for League of Legends (macro model + 5 role
+models). Post-game only, official Riot APIs only. No live features.
+Train on EUW1; transfer study to NA1 and KR. Clean slate: no legacy code.
 
-The final product is a coordinated six-policy macro coach: one team-direction model
-and one specialist for each of TOP, JUNGLE, MIDDLE, BOTTOM and UTILITY. All six target
-terminal team victory. An ADC pilot must never redefine or replace this product scope.
-Train and evaluate each policy separately using shared causal contracts and match splits.
-Return the team proposal and selected role's proposal together, with explicit alignment,
-conflict or missing support. Do not invent that a role model was trained conditional on
-a proposed plan when coordination is only a serving-time compatibility check.
+## Non-negotiable rules
+- Never read, print, or commit the Riot API key or the Kaggle token.
+  Commands needing them are Makefile targets that the user runs.
+- Never call the live Riot API or Kaggle from tests or CI.
+- Datasets are keyed on matchId + participant slot, never PUUID.
+- Splits are temporal and grouped by match, never random.
+- Claims in docs are labeled: established / plausible / speculative.
+  Never invent benchmarks.
 
-Build next-action policies for a team or a selected player/role toward terminal victory.
-Do not turn current formation labels into recommendations. A functioning offline RL run
-does not establish optimality, strategic utility or calibrated win probabilities.
+## Architecture
+Hexagonal. Packages: domain, ingestion, storage, features, models,
+training, evaluation, serving, interface. Dependencies point inward.
+domain has no I/O. Contracts = typed Protocols + versioned pydantic schemas.
 
-- `production/src/offline_rift/`: collection, catalogs, workflow, maintained training,
-  inference and local UI. Keep one orchestration path through `rift` / `python workflow.py`.
-- `common/src/rift_common/`: shared actions, causal state, timeline reconstruction,
-  executed-option evidence, explicit transitions, network and artifact handling.
-- `research/src/rift_research/`: optional new-objective studies and frozen diagnostics.
-- `tests/`: every test, in this one folder. Synthetic fixtures belong only in tests.
-- `docs/`: current contracts; `research/docs/`: results from specific observed runs.
+## Code standards
+- Full type hints, strict type checking, linter/formatter, pre-commit.
+- Pure functions for transforms, dependency injection, no global state,
+  typed config-driven runs, deterministic seeds, idempotent pipelines.
+- Write tests first or together with code. Every task must pass locally
+  on CPU with tiny fixtures.
+- Code that implements an equation cites its ID from docs/math/.
 
-Common must import neither application nor research. Production must never import
-research. Runtime policy loading must not import training orchestration. Use composition,
-small explicit interfaces and dataclasses where useful; avoid speculative frameworks.
+## Training (Kaggle)
+- Entry point: `python -m <pkg>.training.run --config <file>`, same locally
+  and in a Kaggle script kernel. No logic in notebooks.
+- Kaggle is driven only via the Kaggle CLI through Makefile targets.
+- Jobs checkpoint and resume. Training runs have no internet.
 
-Keep domain contracts in common, optimizer code in production/training, inference-only
-bundle loading/routing in production/inference, workflow orchestration in workflow.py,
-and optional offline comparisons/report generation in research. Six independent model
-bundles share one dataset pipeline; do not duplicate collection or training implementations.
-Make per-policy support, abstention and collapse visible, including failed macro targets.
-Keep mathematical assumptions and losses in docs/MATHEMATICAL_DESIGN.md. All algorithms,
-including imitation, may compete on frozen development criteria; never exclude a better
-baseline solely to promote RL. Report robustness/coverage tradeoffs and failed gates.
-Withhold conflicting role destinations after persistence rather than inventing a compatible
-alternative. Independent proposals are not proof of strategic coherence.
-Do not turn "no coherent observed team action" into a positive learned strategy label.
-Archive superseded prototypes and dated reports with checksums; keep current docs concise.
+## Definition of done
+spec -> tests -> implementation -> docs -> lint/types/tests pass.
 
-## Modeling invariants
-
-- Inputs contain only causal observations/history. Future observations may identify
-  executed-option/reward targets, never preceding input features. Never use final match
-  economic statistics as state. Role metadata is retrospective and must be documented.
-- Current training intervals use measured frames, usually about a minute apart. Do not
-  invent intermediate movement, commands, casts, waves, cooldowns, coordinates or vision.
-- Version incompatible state/action/dataset schemas explicitly. Preserve masks and shared
-  ordering/scaling. Live player/role selection must be reported or explicitly provided.
-- Preserve actor episodes, terminal boundaries, exact stored next states and elapsed-time
-  discount. Never stitch across unresolved actions. Log exclusions and their bias.
-- Deduplicate matches and keep all player/team perspectives from a match in one split.
-- Rewards are terminal team win/loss unless an explicitly studied version changes them.
-  Keep shaping studies separate. Q values and behavior scores are not win probabilities.
-- Report action and role support, behavior agreement, majority baseline, abstention,
-  concentration and collapsed predictions. These are diagnostic, not policy win rate.
-- Do not claim precise micro, gank intent, camp/vision safety or optimal choices from
-  coarse observations. Keep unsupported action families explicit in the research roadmap.
-
-## APIs, data and artifacts
-
-Use configured verified PUUIDs as collection identities. Do not guess accounts from names
-or silently change the primary account. Collection defaults to the primary player;
-collection across configured accounts is explicit. Keep Riot keys only in RIOT_API_KEY,
-use the token header and correct regional/platform routing. Preserve bounded retries and
-honor Retry-After without early retry. Cache raw payloads by match ID.
-
-Resolve item catalogs to the game's exact patch, without nearest-version fallback.
-Objective rules are pinned, patch scoped estimates. Persist progress/metadata atomically.
-Publish latest references only after successful validation and complete training/reload.
-Retain historical raw data, datasets/models and failed/interrupted reports. The old
-objective's source/docs were archived in data/archive at the user's request; do not
-reintroduce that objective or delete the archived artifacts as cleanup.
-
-Never commit keys, .env, root workflow.json, data/, root models/, catalogs, logs or .venv.
-Use Python 3.10+ and the existing .venv; dependencies are in pyproject.toml. Do not add
-one-off scripts or duplicate collection/build/train paths.
-
-## Validation and handoff
-
-Run from the repository root:
-
-```bash
-.venv/bin/ruff check .
-.venv/bin/ruff format --check .
-.venv/bin/python -m pytest -q
-git diff --check
-```
-
-Tests must not access Riot or Data Dragon. Mock pagination, transport, rate limits,
-duplicates, interrupted collection and catalog mismatch. Keep real Torch optimizer /
-save / reload checks small. Check affected CLI --help and installed rift entry points.
-Optional browser checks use a local fixture server and RIFT_TEST_BROWSER, never live
-training data. Explain changes, validation and material limits. Never claim authenticated
-collection or live-game integration without actually exercising it.
-
-## graphify
-
-This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
-
-When the user types `/graphify`, use the installed graphify skill or instructions before doing anything else.
-
-Rules:
-- When graphify-out/graph.json exists, run `graphify query "<question>"` before your first grep, search or source-file read for a codebase question, and put this rule in every subagent prompt that explores code. Read raw files only for lines the graph or an earlier read already located. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
-- Dirty graphify-out/ files are expected after hooks or incremental updates; dirty graph files are not a reason to skip graphify. Only skip graphify if the task is about stale or incorrect graph output, or the user explicitly says not to use it.
-- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
-- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
-- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
-- A committed graphify-out/graph.json is rewritten whole on every build, so a large diff to it in a pull request is expected. Do not flag it as churn or suggest skipping the graph rebuild or its hooks.
+## Working style
+- Small diffs. One task at a time. Say what you changed and what you did not.
+- If a spec is ambiguous, stop and ask instead of guessing.
